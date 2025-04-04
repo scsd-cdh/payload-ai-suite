@@ -1,4 +1,4 @@
-"""CLI entry point for tools suite access.
+"""CLI entry point for tools suite access. As needed, add appropriate arguement options as the project grows. 
 """
 import argparse
 import model
@@ -17,7 +17,7 @@ if __name__ == "__main__":
     allows users to run a model or execute specific data-fetching functions.
 
     Command-line Arguments:
-        -r, --run-model: Run the model.
+        --run-model: Run the model.
         --nasa-firms: Fetch data from NASA FIRMS API.
         --setup-auth: Set up OAuth2 authentication for Copernicus.
         --batch-download: Download images using Selenium.
