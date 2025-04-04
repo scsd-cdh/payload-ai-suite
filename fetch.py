@@ -16,14 +16,28 @@ from selenium import webdriver
 from selenium.webdriver.common.by import By
 
 def nasa_firms_api():
-    """https://firms.modaps.eosdis.nasa.gov/api/ Fire Information for Resource Management System
-    /api/area/csv/[NASA_KEy]/[SOURCE]/[AREA_COORDINATES]/[DAY_RANGE]/[DATE]
+    """Fetches data availability from NASA FIRMS API.
+
+    This function uses the NASA FIRMS API to retrieve data availability in CSV format.
+    The API key is retrieved from the environment variable `NASA_KEY`.
+
+    Returns:
+        None
     """
+    # https://firms.modaps.eosdis.nasa.gov/api/ Fire Information for Resource Management System
+    # /api/area/csv/[NASA_KEy]/[SOURCE]/[AREA_COORDINATES]/[DAY_RANGE]/[DATE]
     NASA_KEY = os.getenv("NASA_KEY")
     data_url = 'https://firms.modaps.eosdis.nasa.gov/api/data_availability/csv/' + NASA_KEY + '/all'
     data_frame = pd.read_csv(data_url)
 
 def setup_auth():
+    """Sets up OAuth2 authentication for Copernicus Data Space Ecosystem.
+
+    Retrieves an access token using client credentials and returns it for use in API requests.
+
+    Returns:
+        dict: A dictionary containing the access token and related information.
+    """
     # Your client credentials
     client_id = os.getenv("CLIENT_ID")
     client_secret = os.getenv("CLIENT_SECRET")
@@ -42,6 +56,15 @@ def setup_auth():
     return token
 
 def batch_data_downloader_selenium(url=None, max_pages=9):
+    """Downloads images from a Flickr album using Selenium.
+
+    Args:
+        url (str, optional): URL of the Flickr album. Defaults to a hardcoded URL.
+        max_pages (int, optional): Maximum number of pages to scrape. Defaults to 9.
+
+    Returns:
+        int: The number of images downloaded.
+    """
     # TODO: Hardcoded url for now, if needed expose this for customization
     url = "https://www.flickr.com/photos/esa_events/albums/72157716491073681/"
     destination = "../data/flickr"
@@ -83,6 +106,14 @@ def batch_data_downloader_selenium(url=None, max_pages=9):
     return downloaded
 
 def retrieve_eonet_cross_reference():
+    """Fetches wildfire data from the EONET API and saves it to a JSON file.
+
+    The data is retrieved from the EONET API's wildfire category and saved to
+    `events/categories.json`.
+
+    Returns:
+        None
+    """
     # Code used to gather cross referencing data
     wildfire_url = "https://eonet.gsfc.nasa.gov/api/v3/categories/wildfires"
     response = requests.get(url=wildfire_url)
@@ -91,14 +122,21 @@ def retrieve_eonet_cross_reference():
          json.dump(data, f, ensure_ascii=False, indent=4)
 
 def copernicus_sentiel_query():
-    """ Sentiel-2 bands of interest
+    """Queries Sentinel-2 and Sentinel-1 data from the Copernicus Data Space Ecosystem.
+
+    This function uses an inline evaluation script to process Sentinel-2 bands of interest
+    and retrieves data for a specified bounding box and time range.
+
+    Sentiel-2 bands of interest
     B2: Blue
     B3: Green
     B4: Red
     B5-B8, B8a Visible and Near Infared (VNIR)
 
-    Need a valid eval script, specified bands, specified data range
+    Returns:
+        None
     """
+    # Need a valid eval script, specified bands, specified data range
     ACCESS_TOKEN = setup_auth()
     headers={f"Authorization" : "Bearer {ACCESS_TOKEN}"}
     # Example code how to query copernicus sentiel 2 data and do explcit image processing evals with inline script.
