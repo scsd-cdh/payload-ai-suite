@@ -21,11 +21,13 @@ def nasa_firms_api():
     This function uses the NASA FIRMS API to retrieve data availability in CSV format.
     The API key is retrieved from the environment variable `NASA_KEY`.
 
+    https://firms.modaps.eosdis.nasa.gov/api/ Fire Information for Resource Management System
+    /api/area/csv/[NASA_KEy]/[SOURCE]/[AREA_COORDINATES]/[DAY_RANGE]/[DATE]
+
     Returns:
         None
     """
-    # https://firms.modaps.eosdis.nasa.gov/api/ Fire Information for Resource Management System
-    # /api/area/csv/[NASA_KEy]/[SOURCE]/[AREA_COORDINATES]/[DAY_RANGE]/[DATE]
+
     NASA_KEY = os.getenv("NASA_KEY")
     data_url = 'https://firms.modaps.eosdis.nasa.gov/api/data_availability/csv/' + NASA_KEY + '/all'
     data_frame = pd.read_csv(data_url)
@@ -121,6 +123,74 @@ def retrieve_eonet_cross_reference():
     with open('events/categories.json', 'w', encoding='utf-8') as f:
          json.dump(data, f, ensure_ascii=False, indent=4)
 
+def extract_bounding_box_from_eonet(file_path='events/categories.json'):
+    """Extracts coordinates from the EONET categories JSON file and converts them to a bounding box.
+
+    Args:
+        file_path (str): Path to the JSON file containing EONET wildfire events. Defaults to 'events/categories.json'.
+
+    Returns:
+        list: A bounding box in the format [min_lon, min_lat, max_lon, max_lat].
+    """
+    try:
+        with open(file_path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+
+        # Extract coordinates from the events
+        coordinates = []
+        for event in data.get('events', []):
+            if 'geometry' in event:
+                for geo in event['geometry']:
+                    if geo.get('type') == 'Point':
+                        coordinates.append(geo.get('coordinates'))
+
+        if not coordinates:
+            raise ValueError("No valid coordinates found in the JSON file.")
+
+        # Calculate bounding box
+        lons = [coord[0] for coord in coordinates]
+        lats = [coord[1] for coord in coordinates]
+        bounding_box = [min(lons), min(lats), max(lons), max(lats)]
+
+        return bounding_box
+
+    except Exception as e:
+        print(f"Error extracting bounding box: {e}")
+        return None
+
+def extract_time_ranges_from_eonet(file_path='events/categories.json'):
+    """Extracts time ranges from the EONET categories JSON file and converts them to the required format.
+
+    Args:
+        file_path (str): Path to the JSON file containing EONET wildfire events. Defaults to 'events/categories.json'.
+
+    Returns:
+        list of dict: A list of time ranges in the format [{"from": "YYYY-MM-DDTHH:MM:SSZ", "to": "YYYY-MM-DDTHH:MM:SSZ"}].
+    """
+    try:
+        with open(file_path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+
+        # Extract time ranges from the events
+        time_ranges = []
+        for event in data.get('events', []):
+            if 'geometry' in event:
+                for geo in event['geometry']:
+                    if 'date' in geo:
+                        start_time = geo['date']
+                        # Assuming a default duration of 2 days for the time range
+                        end_time = (pd.to_datetime(start_time) + pd.Timedelta(days=2)).strftime('%Y-%m-%dT%H:%M:%SZ')
+                        time_ranges.append({"from": start_time, "to": end_time})
+
+        if not time_ranges:
+            raise ValueError("No valid time ranges found in the JSON file.")
+
+        return time_ranges
+
+    except Exception as e:
+        print(f"Error extracting time ranges: {e}")
+        return []
+
 def copernicus_sentiel_query():
     """Queries Sentinel-2 and Sentinel-1 data from the Copernicus Data Space Ecosystem.
 
@@ -139,17 +209,18 @@ def copernicus_sentiel_query():
     # Need a valid eval script, specified bands, specified data range
     ACCESS_TOKEN = setup_auth()
     headers={f"Authorization" : "Bearer {ACCESS_TOKEN}"}
-    # Example code how to query copernicus sentiel 2 data and do explcit image processing evals with inline script.
 
-    # TODO: Add parameters to use FIRMS API long/lat
+    bbox = extract_bounding_box_from_eonet()
+    time_ranges = extract_time_ranges_from_eonet()
+
+    # Example code how to query copernicus sentiel 2 data and do explcit image processing evals with inline script.
+    # Currently reading from the eo_net wildfire json file.
+    # Testing the first bbox and time range for now.
     request = {
     "input": {
         "bounds": {
             "bbox": [
-                -59.75738525390625,
-                -19.919130502461016,
-                -58.7274169921875,
-                -19.062117883514652,
+                bbox[0]
             ],
             "properties": {"crs": "http://www.opengis.net/def/crs/EPSG/0/4326"},
         },
@@ -159,28 +230,8 @@ def copernicus_sentiel_query():
                 "id": "l2a_t1",
                 "dataFilter": {
                     "timeRange": {
-                        "from": "2019-09-06T00:00:00Z",
-                        "to": "2019-09-08T23:59:59Z",
-                    }
-                },
-            },
-            {
-                "type": "sentinel-1-grd",
-                "id": "s1_t1",
-                "dataFilter": {
-                    "timeRange": {
-                        "from": "2019-09-06T00:00:00Z",
-                        "to": "2019-09-08T23:59:59Z",
-                    }
-                },
-            },
-            {
-                "type": "sentinel-1-grd",
-                "id": "s1_t2",
-                "dataFilter": {
-                    "timeRange": {
-                        "from": "2019-09-11T00:00:00Z",
-                        "to": "2019-09-13T23:59:59Z",
+                        time_ranges[0]["from"],
+                        time_ranges[0]["to"],
                     }
                 },
             },
