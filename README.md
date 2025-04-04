@@ -4,8 +4,7 @@ Collection software tools for multispectral image analysis and model testing.
 # Features
 - Cross reference FIRMS fire events and query via Copernicus's process API
 - Analyze downloaded multispectral data with ENVI
-- View multispectral data with OpenCV
-- Run VGG model on labeled data
+- Run VGG model on labeled (fire/no fire) data
 
 #### Resources
 - [Deep Learning in OpenCV](https://github.com/opencv/opencv/wiki/Deep-Learning-in-OpenCV)

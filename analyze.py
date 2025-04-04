@@ -1,4 +1,4 @@
-""" Example script on how to start matlab engine instance
+"""Example script on how to start matlab engine instance
 and interwave spectral python and matlab hyperspectral image
 toolbox source code.
 
@@ -12,6 +12,15 @@ import spectral.io.envi as envi
 import torch
 
 def run_engine():
+    """Starts the MATLAB engine and performs change detection on hyperspectral images.
+
+    This function initializes a MATLAB engine instance, loads two hyperspectral
+    image datasets, and executes MATLAB code to detect changes between the datasets
+    using a specified window size.
+
+    Raises:
+        matlab.engine.MatlabExecutionError: If there is an error in executing MATLAB code.
+    """
     # Start matlab engine
     core = matlab.engine.start_matlab()
 
@@ -75,7 +84,13 @@ def run_engine():
     core.eval(matlab_code, nargout=0)
 
 def spectral():
-    """Example of using multi/hyperspectral data
+    """Demonstrates basic manipulation of multispectral/hyperspectral data.
+
+    This function provides an example of how to use the Spectral Python (SPy) library
+    to manipulate and analyze multispectral or hyperspectral data.
+
+    Raises:
+        Exception: If there is an error in data manipulation.
     """
     # Find Indian Pine dataset here: https://purr.purdue.edu/publications/1947/1
     # Used gdal from osgeo to create an hdr version for envi analysis.
@@ -95,4 +110,3 @@ def spectral():
     # PyTorch tensor of the mmmap data
     tensor = torch.Tensor(memmap.copy())
     print(f" Example tensor histogram: {tensor.histogram()}")
-

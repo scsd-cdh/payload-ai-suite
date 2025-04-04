@@ -23,9 +23,14 @@ import matplotlib.pyplot as plt
 
 
 def train(validate=False, epochs=2):
-    """Train CNN VGG model on labeled data
-    Parameters:
-        validate (boolean):
+    """Train CNN VGG model on labeled data.
+
+    Args:
+        validate (bool): Whether to validate the model after training.
+        epochs (int): Number of epochs to train the model.
+
+    Returns:
+        None
     """
     X = []
     y = []
@@ -103,6 +108,14 @@ def train(validate=False, epochs=2):
         plt.show()
 
 def export_to_onnx(model):
+    """Export the trained model to ONNX format.
+
+    Args:
+        model (tf.keras.Model): The trained Keras model to be exported.
+
+    Returns:
+        None
+    """
     input_signature = [
         tf.TensorSpec(
             shape=model.input_shape,
