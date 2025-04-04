@@ -128,7 +128,7 @@ def retrieve_eonet_cross_reference():
          json.dump(data, f, ensure_ascii=False, indent=4)
 
 def extract_bounding_box_from_eonet(file_path='events/categories.json'):
-    """Extracts coordinates from the EONET categories JSON file and converts them to a bounding box.
+    """Extracts coordinates from the EONET categories JSON file.
 
     Args:
         file_path (str): Path to the JSON file containing EONET wildfire events. Defaults to 'events/categories.json'.
@@ -151,15 +151,45 @@ def extract_bounding_box_from_eonet(file_path='events/categories.json'):
         if not coordinates:
             raise ValueError("No valid coordinates found in the JSON file.")
 
-        # Calculate bounding box
-        lons = [coord[0] for coord in coordinates]
-        lats = [coord[1] for coord in coordinates]
-        bounding_box = [min(lons), min(lats), max(lons), max(lats)]
+        # # Calculate bounding box
+        # lons = [coord[0] for coord in coordinates]
+        # lats = [coord[1] for coord in coordinates]
+        # bounding_box = [min(lons), min(lats), max(lons), max(lats)]
 
-        return bounding_box
+        return coordinates
 
     except Exception as e:
         print(f"Error extracting bounding box: {e}")
+        return None
+
+def extract_eonet_coordinates(file_path='events/categories.json'):
+    """Extracts coordinates from the EONET categories JSON file.
+
+    Args:
+        file_path (str): Path to the JSON file containing EONET wildfire events. Defaults to 'events/categories.json'.
+
+    Returns:
+        list: A list of coordinates in the format [[lon, lat], [lon, lat], ...].
+    """
+    try:
+        with open(file_path, 'r', encoding='utf-8') as f:
+            data = json.load(f)
+
+        # Extract coordinates from the events
+        coordinates = []
+        for event in data.get('events', []):
+            if 'geometry' in event:
+                for geo in event['geometry']:
+                    if geo.get('type') == 'Point':
+                        coordinates.append(geo.get('coordinates'))
+
+        if not coordinates:
+            raise ValueError("No valid coordinates found in the JSON file.")
+
+        return coordinates
+
+    except Exception as e:
+        print(f"Error extracting coordinates: {e}")
         return None
 
 def extract_time_ranges_from_eonet(file_path='events/categories.json'):
@@ -214,9 +244,9 @@ def copernicus_sentiel_query():
     ACCESS_TOKEN = setup_auth()
     headers={f"Authorization" : f"Bearer {ACCESS_TOKEN}"}
 
-    bbox = extract_bounding_box_from_eonet()
-    print(bbox)
+
     time_ranges = extract_time_ranges_from_eonet()
+    coordinates = extract_eonet_coordinates()
 
     # Example code how to query copernicus sentiel 2 data and do explcit image processing evals with inline script.
     # Currently reading from the eo_net wildfire json file.
@@ -224,10 +254,11 @@ def copernicus_sentiel_query():
     request = {
     "input": {
         "bounds": {
-            "bbox":
-                bbox
-            ,
             "properties": {"crs": "http://www.opengis.net/def/crs/EPSG/0/4326"},
+            "geometry": {
+            "type": "Polygon",
+                "coordinates": coordinates,
+            }
         },
         "data": [
             {
