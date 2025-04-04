@@ -61,56 +61,6 @@ def setup_auth():
     # All requests using this session will have an access token automatically added
     return token['access_token']
 
-def batch_data_downloader_selenium(url=None, max_pages=9):
-    """Downloads images from a Flickr album using Selenium.
-
-    Args:
-        url (str, optional): URL of the Flickr album. Defaults to a hardcoded URL.
-        max_pages (int, optional): Maximum number of pages to scrape. Defaults to 9.
-
-    Returns:
-        int: The number of images downloaded.
-    """
-    # TODO: Hardcoded url for now, if needed expose this for customization
-    url = "https://www.flickr.com/photos/esa_events/albums/72157716491073681/"
-    destination = "./data/labeled/no"
-    driver = webdriver.Chrome()  # Make sure you have chromedriver installed
-    driver.get(url)
-    downloaded = 0
-    last_height = driver.execute_script("return document.body.scrollHeight")
-    # TODO: figure out how to go past 100
-    # either pagination or rate limit
-    # might need to retrieve next page element
-    while True:
-        # Scroll down
-        driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-        time.sleep(2)  # Wait for images to load
-
-        # Get all image elements
-        images = driver.find_elements(By.TAG_NAME, 'img')
-
-        # Download new images
-        for img in images[downloaded:]:
-            src = img.get_attribute('src')
-            if src and src.startswith('http'):
-                try:
-                    response = requests.get(src)
-                    filepath = os.path.join(destination, f'image_{downloaded}.jpg')
-                    with open(filepath, 'wb') as f:
-                        f.write(response.content)
-                    print(f"Downloaded: {filepath}")
-                    downloaded += 1
-                except Exception as e:
-                    print(f"Error: {e}")
-
-        # Check if we've reached the bottom
-        new_height = driver.execute_script("return document.body.scrollHeight")
-        if new_height == last_height:
-            break
-        last_height = new_height
-    driver.quit()
-    return downloaded
-
 def retrieve_eonet_cross_reference():
     """Fetches wildfire data from the EONET API and saves it to a JSON file.
 
@@ -127,40 +77,6 @@ def retrieve_eonet_cross_reference():
     with open('events/categories.json', 'w', encoding='utf-8') as f:
          json.dump(data, f, ensure_ascii=False, indent=4)
 
-def extract_bounding_box_from_eonet(file_path='events/categories.json'):
-    """Extracts coordinates from the EONET categories JSON file.
-
-    Args:
-        file_path (str): Path to the JSON file containing EONET wildfire events. Defaults to 'events/categories.json'.
-
-    Returns:
-        list: A bounding box in the format [min_lon, min_lat, max_lon, max_lat].
-    """
-    try:
-        with open(file_path, 'r', encoding='utf-8') as f:
-            data = json.load(f)
-
-        # Extract coordinates from the events
-        coordinates = []
-        for event in data.get('events', []):
-            if 'geometry' in event:
-                for geo in event['geometry']:
-                    if geo.get('type') == 'Point':
-                        coordinates.append(geo.get('coordinates'))
-
-        if not coordinates:
-            raise ValueError("No valid coordinates found in the JSON file.")
-
-        # # Calculate bounding box
-        # lons = [coord[0] for coord in coordinates]
-        # lats = [coord[1] for coord in coordinates]
-        # bounding_box = [min(lons), min(lats), max(lons), max(lats)]
-
-        return coordinates
-
-    except Exception as e:
-        print(f"Error extracting bounding box: {e}")
-        return None
 
 def extract_eonet_coordinates(file_path='events/categories.json'):
     """Extracts coordinates from the EONET categories JSON file.
@@ -186,7 +102,7 @@ def extract_eonet_coordinates(file_path='events/categories.json'):
         if not coordinates:
             raise ValueError("No valid coordinates found in the JSON file.")
 
-        return coordinates
+        return [coordinates]
 
     except Exception as e:
         print(f"Error extracting coordinates: {e}")
@@ -309,3 +225,51 @@ def copernicus_sentiel_query():
     url = "https://sh.dataspace.copernicus.eu/api/v1/process"
     response = requests.post(url, json=request, headers=headers)
     print(response.content)
+
+def batch_data_downloader_selenium(url=None, max_pages=9):
+    """Downloads images from a Flickr album using Selenium.
+
+    Args:
+        url (str, optional): URL of the Flickr album. Defaults to a hardcoded URL.
+        max_pages (int, optional): Maximum number of pages to scrape. Defaults to 9.
+
+    Returns:
+        int: The number of images downloaded.
+    """
+    # TODO: Hardcoded url for now, if needed expose this for customization
+    url = "https://www.flickr.com/photos/esa_events/albums/72157716491073681/"
+    destination = "./data/labeled/no"
+    driver = webdriver.Chrome()  # Make sure you have chromedriver installed
+    driver.get(url)
+    downloaded = 0
+    last_height = driver.execute_script("return document.body.scrollHeight")
+    
+    # TODO: figure out how to go past 100
+    # either pagination or rate limit
+    # might need to retrieve next page element.
+    while True:
+        # Scroll down
+        driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+        time.sleep(2)  # Wait for images to load
+        # Get all image elements
+        images = driver.find_elements(By.TAG_NAME, 'img')
+        # Download new images
+        for img in images[downloaded:]:
+            src = img.get_attribute('src')
+            if src and src.startswith('http'):
+                try:
+                    response = requests.get(src)
+                    filepath = os.path.join(destination, f'image_{downloaded}.jpg')
+                    with open(filepath, 'wb') as f:
+                        f.write(response.content)
+                    print(f"Downloaded: {filepath}")
+                    downloaded += 1
+                except Exception as e:
+                    print(f"Error: {e}")
+        # Check if we've reached the bottom
+        new_height = driver.execute_script("return document.body.scrollHeight")
+        if new_height == last_height:
+            break
+        last_height = new_height
+    driver.quit()
+    return downloaded
