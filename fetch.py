@@ -46,6 +46,7 @@ def setup_auth():
         dict: A dictionary containing the access token and related information.
     """
     # Your client credentials
+    # If not set, please check README for further information.
     client_id = os.getenv("CLIENT_ID")
     client_secret = os.getenv("CLIENT_SECRET")
 
@@ -58,9 +59,7 @@ def setup_auth():
                             client_secret=client_secret, include_client_id=True)
 
     # All requests using this session will have an access token automatically added
-    resp = oauth.get("https://sh.dataspace.copernicus.eu/configuration/v1/wms/instances")
-    print(resp.content)
-    return token
+    return token['access_token']
 
 def batch_data_downloader_selenium(url=None, max_pages=9):
     """Downloads images from a Flickr album using Selenium.
@@ -213,7 +212,7 @@ def copernicus_sentiel_query():
     """
     # Need a valid eval script, specified bands, specified data range
     ACCESS_TOKEN = setup_auth()
-    headers={f"Authorization" : "Bearer {ACCESS_TOKEN}"}
+    headers={f"Authorization" : f"Bearer {ACCESS_TOKEN}"}
 
     bbox = extract_bounding_box_from_eonet()
     time_ranges = extract_time_ranges_from_eonet()
@@ -235,13 +234,14 @@ def copernicus_sentiel_query():
                 "id": "l2a_t1",
                 "dataFilter": {
                     "timeRange": {
-                        time_ranges[0]["from"],
-                        time_ranges[0]["to"],
+                        "from": time_ranges[0]["from"],
+                        "to": time_ranges[0]["to"],
                     }
                 },
             },
 
         ]
+
     },
     "output": {
         "width": 1024,
@@ -271,7 +271,8 @@ def copernicus_sentiel_query():
         }
 
 
-    """
+    """,
+
     }
     url = "https://sh.dataspace.copernicus.eu/api/v1/process"
     response = requests.post(url, json=request, headers=headers)
