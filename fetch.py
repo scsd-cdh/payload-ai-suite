@@ -26,11 +26,15 @@ def nasa_firms_api():
     /api/area/csv/[NASA_KEy]/[SOURCE]/[AREA_COORDINATES]/[DAY_RANGE]/[DATE]
 
     Returns:
-        None
+        pd.DataFrame: A DataFrame containing the data availability information for NASA FIRMS.
     """
+    # TODO: Implement AREA_COORDINATES and DAY_RANGE etc. paramters for API call
     NASA_KEY = os.getenv("NASA_KEY")
     data_url = 'https://firms.modaps.eosdis.nasa.gov/api/data_availability/csv/' + NASA_KEY + '/all'
     data_frame = pd.read_csv(data_url)
+    print(data_frame)
+    return data_frame
+
 
 def setup_auth():
     """

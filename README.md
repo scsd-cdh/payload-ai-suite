@@ -36,7 +36,7 @@ payload-ai-suite/
 # Environment Variables
 The following environment variables are required for the project to function correctly:
 
-- `NASA_KEY`: Your NASA FIRMS API key for accessing wildfire data.
+- `NASA_KEY`: Your NASA FIRMS API key for accessing wildfire data. Request one at https://firms.modaps.eosdis.nasa.gov/api/map_key/
 - `CLIENT_ID`: Client ID for Copernicus Data Space Ecosystem.
 - `CLIENT_SECRET`: Client secret for Copernicus Data Space Ecosystem.
 
