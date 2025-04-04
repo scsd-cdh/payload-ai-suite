@@ -1,0 +1,34 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*.pyo
+
+# Virtual environment
+venv/
+.env/
+
+# Environment variables
+*.env
+
+# Jupyter Notebook checkpoints
+.ipynb_checkpoints/
+
+# Logs and databases
+*.log
+*.sqlite3
+
+# Data files
+data/
+events/
+
+# OS-specific files
+.DS_Store
+Thumbs.db
+
+# Selenium driver binaries
+chromedriver
+geckodriver
+
+# IDE-specific files
+.vscode/
+.idea/
