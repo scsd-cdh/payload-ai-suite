@@ -24,7 +24,7 @@ if __name__ == "__main__":
         --batch-download: Download images using Selenium.
         --eonet-crossref: Fetch wildfire data from the EONET API.
         --copernicus-query: Query Sentinel data from Copernicus.
-        --bbox: Bounding box for the query in the format: MIN_LON MIN_LAT MAX_LON MAX_LAT.
+        --coordinates: Specify coordinates for the query in the format: LON LAT.
         --time-range: Time range for the query in the format: FROM TO
                       (e.g., '2023-01-01T00:00:00Z 2023-01-03T23:59:59Z').
 
@@ -41,8 +41,8 @@ if __name__ == "__main__":
     parser.add_argument('--batch-download', required=False, action='store_true', help="Download images using Selenium")
     parser.add_argument('--eonet-crossref', required=False, action='store_true', help="Fetch wildfire data from the EONET API")
     parser.add_argument('--copernicus-query', required=False, action='store_true', help="Query Sentinel data from Copernicus")
-    parser.add_argument('--bbox', required=False, nargs=4, type=float, metavar=('MIN_LON', 'MIN_LAT', 'MAX_LON', 'MAX_LAT'),
-                        help="Bounding box for the query in the format: MIN_LON MIN_LAT MAX_LON MAX_LAT")
+    parser.add_argument('--coordinates', required=False, nargs=2, type=float, metavar=('LON', 'LAT'),
+                        help="Specify coordinates for the query in the format: LON LAT")
     parser.add_argument('--time-range', required=False, nargs=2, metavar=('FROM', 'TO'),
                         help="Time range for the query in the format: FROM TO (e.g., '2023-01-01T00:00:00Z 2023-01-03T23:59:59Z')")
 
