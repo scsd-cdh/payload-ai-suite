@@ -215,6 +215,7 @@ def copernicus_sentiel_query():
     headers={f"Authorization" : f"Bearer {ACCESS_TOKEN}"}
 
     bbox = extract_bounding_box_from_eonet()
+    print(bbox)
     time_ranges = extract_time_ranges_from_eonet()
 
     # Example code how to query copernicus sentiel 2 data and do explcit image processing evals with inline script.
@@ -223,9 +224,9 @@ def copernicus_sentiel_query():
     request = {
     "input": {
         "bounds": {
-            "bbox": [
-                bbox[0]
-            ],
+            "bbox":
+                bbox
+            ,
             "properties": {"crs": "http://www.opengis.net/def/crs/EPSG/0/4326"},
         },
         "data": [
@@ -276,4 +277,4 @@ def copernicus_sentiel_query():
     }
     url = "https://sh.dataspace.copernicus.eu/api/v1/process"
     response = requests.post(url, json=request, headers=headers)
-    print(response.json())
+    print(response.content)
