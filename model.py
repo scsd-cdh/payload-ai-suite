@@ -23,7 +23,8 @@ import matplotlib.pyplot as plt
 
 
 def train(validate=False, epochs=2):
-    """Train CNN VGG model on labeled data.
+    """
+    Train CNN VGG model on labeled data.
 
     Args:
         validate (bool): Whether to validate the model after training.
@@ -56,21 +57,22 @@ def train(validate=False, epochs=2):
     y_test = np.array(y_test)
     X_test = np.array(X_test)
 
-    print ("Shape of an image in X_train: ", X_train.shape)
-    print ("Shape of an image in X_test: ", X_test.shape)
+    print("Shape of an image in X_train: ", X_train.shape)
+    print("Shape of an image in X_test: ", X_test.shape)
     print("y_train Shape: ", y_train.shape)
     print("y_test Shape: ", y_test.shape)
 
     img_rows, img_cols = 224, 224
-    vgg = tf.keras.applications.vgg16.VGG16(weights='imagenet', include_top=False, input_shape = (img_rows, img_cols, 3))
+    vgg = tf.keras.applications.vgg16.VGG16(weights='imagenet', include_top=False, input_shape=(img_rows, img_cols, 3))
 
     # Here we freeze the last 4 layers
     # Layers are set to trainable as True by default
     for layer in vgg.layers:
         layer.trainable = False
 
-    for (i,layer) in enumerate(vgg.layers):
-        print(str(i) + " "+ layer.__class__.__name__, layer.trainable)
+    for (i, layer) in enumerate(vgg.layers):
+        print(str(i) + " " + layer.__class__.__name__, layer.trainable)
+
         def create_top(bottom_model, num_classes):
             top_model = bottom_model.output
             top_model = keras.layers.GlobalAveragePooling2D()(top_model)
@@ -82,14 +84,14 @@ def train(validate=False, epochs=2):
 
     num_classes = 2
     head = create_top(vgg, num_classes)
-    model = keras.models.Model(inputs = vgg.input, outputs = head)
+    model = keras.models.Model(inputs=vgg.input, outputs=head)
     print(model.summary())
-    model.compile(optimizer='adam', loss = 'categorical_crossentropy', metrics = ['accuracy'])
+    model.compile(optimizer='adam', loss='categorical_crossentropy', metrics=['accuracy'])
     history = model.fit(X_train, y_train,
-                    epochs=epochs,
-                    validation_data=(X_test, y_test),
-                    verbose = 1,
-                    initial_epoch=0)
+                        epochs=epochs,
+                        validation_data=(X_test, y_test),
+                        verbose=1,
+                        initial_epoch=0)
 
     accuracy = history.history['accuracy']
     val_accuracy = history.history['val_accuracy']
@@ -107,8 +109,10 @@ def train(validate=False, epochs=2):
         plt.figure()
         plt.show()
 
+
 def export_to_onnx(model):
-    """Export the trained model to ONNX format.
+    """
+    Export the trained model to ONNX format.
 
     Args:
         model (tf.keras.Model): The trained Keras model to be exported.
@@ -124,8 +128,8 @@ def export_to_onnx(model):
         )
     ]
     onnx_model, _ = tf2onnx.convert.from_keras(
-            model,
-            input_signature=input_signature,
-            opset=13  # Specify ONNX opset version
-        )
+        model,
+        input_signature=input_signature,
+        opset=13  # Specify ONNX opset version
+    )
     onnx.save(onnx_model, 'zetane.onnx')

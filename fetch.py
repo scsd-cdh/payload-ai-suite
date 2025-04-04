@@ -16,7 +16,8 @@ from selenium import webdriver
 from selenium.webdriver.common.by import By
 
 def nasa_firms_api():
-    """Fetches data availability from NASA FIRMS API.
+    """
+    Fetches data availability from NASA FIRMS API.
 
     This function uses the NASA FIRMS API to retrieve data availability in CSV format.
     The API key is retrieved from the environment variable `NASA_KEY`.
@@ -27,13 +28,13 @@ def nasa_firms_api():
     Returns:
         None
     """
-
     NASA_KEY = os.getenv("NASA_KEY")
     data_url = 'https://firms.modaps.eosdis.nasa.gov/api/data_availability/csv/' + NASA_KEY + '/all'
     data_frame = pd.read_csv(data_url)
 
 def setup_auth():
-    """Sets up OAuth2 authentication for Copernicus Data Space Ecosystem.
+    """
+    Sets up OAuth2 authentication for Copernicus Data Space Ecosystem.
 
     Retrieves an access token using client credentials and returns it for use in API requests.
 

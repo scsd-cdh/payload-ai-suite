@@ -1,4 +1,4 @@
-"""CLI entry point for tools suite access. As needed, add appropriate arguement options as the project grows.
+"""CLI entry point for tools suite access. As needed, add appropriate argument options as the project grows.
 """
 import argparse
 import model
@@ -11,7 +11,8 @@ from fetch import (
 )
 
 if __name__ == "__main__":
-    """Parses command-line arguments and executes the appropriate functionality.
+    """
+    Parses command-line arguments and executes the appropriate functionality.
 
     This script serves as the entry point for the Payload AI Software Suite. It
     allows users to run a model or execute specific data-fetching functions.
@@ -24,7 +25,8 @@ if __name__ == "__main__":
         --eonet-crossref: Fetch wildfire data from the EONET API.
         --copernicus-query: Query Sentinel data from Copernicus.
         --bbox: Bounding box for the query in the format: MIN_LON MIN_LAT MAX_LON MAX_LAT.
-        --time-range: Time range for the query in the format: FROM TO (e.g., '2023-01-01T00:00:00Z 2023-01-03T23:59:59Z').
+        --time-range: Time range for the query in the format: FROM TO
+                      (e.g., '2023-01-01T00:00:00Z 2023-01-03T23:59:59Z').
 
     Raises:
         SystemExit: If invalid arguments are provided.
