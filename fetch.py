@@ -74,7 +74,7 @@ def batch_data_downloader_selenium(url=None, max_pages=9):
     """
     # TODO: Hardcoded url for now, if needed expose this for customization
     url = "https://www.flickr.com/photos/esa_events/albums/72157716491073681/"
-    destination = "../data/flickr"
+    destination = "./data/labeled/no"
     driver = webdriver.Chrome()  # Make sure you have chromedriver installed
     driver.get(url)
     downloaded = 0
