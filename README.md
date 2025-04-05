@@ -2,9 +2,9 @@
 Collection of software tools for multispectral image analysis and model testing.
 
 # Features
-- Cross-reference FIRMS fire events and query via Copernicus's process API.
-- Analyze downloaded multispectral data with ENVI.
+- Cross-reference FIRMS fire event/EoNet and query via Copernicus's process API.
 - Run VGG model on labeled (fire/no fire) data.
+- Preproces RGB-NIR algorithm
 
 # Mission Goals
 The underlying goal of this project is to illustrate the use of an embedded AI classification model for onboard wildfire detection. The inference provided by the model enables us to discard erroneous images and selectively downlink only successful captures.
@@ -64,7 +64,7 @@ python3 main.py [OPTIONS]
 - `--batch-download`: Download images from Flickr using Selenium.
 - `--eonet-crossref`: Fetch wildfire data from the EONET API and save it locally.
 - `--copernicus-query`: Query Sentinel-2 and Sentinel-1 data from Copernicus.
-- `--bbox MIN_LON MIN_LAT MAX_LON MAX_LAT`: Specify a bounding box for the query.
+- `--coordinates MIN_LON MIN_LAT MAX_LON MAX_LAT`: Specify a bounding box for the query.
 - `--time-range FROM TO`: Specify a time range for the query (e.g., `2023-01-01T00:00:00Z 2023-01-03T23:59:59Z`).
 
 ### Examples
@@ -80,7 +80,7 @@ python3 main.py [OPTIONS]
 
 3. **Query Sentinel data with a bounding box and time range**:
    ```bash
-   python3 main.py --copernicus-query --bbox -59.75 -19.91 -58.72 -19.06 --time-range 2023-01-01T00:00:00Z 2023-01-03T23:59:59Z
+   python3 main.py --copernicus-query --coordinates -59.75 -19.91 -58.72 -19.06 --time-range 2023-01-01T00:00:00Z 2023-01-03T23:59:59Z
    ```
 
 4. **Download images using Selenium**:
