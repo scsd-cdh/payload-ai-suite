@@ -141,6 +141,36 @@ def extract_time_ranges_from_eonet(file_path='events/categories.json'):
         print(f"Error extracting time ranges: {e}")
         return []
 
+def write_image(response, metadata):
+    """Writes image data from an API response to a file.
+
+    This function extracts image data (e.g., PNG) from the response object and writes it to a file.
+    The filename is generated based on the metadata provided, such as the output format.
+
+    Args:
+        response (requests.Response): The response object containing the image data.
+        metadata (dict): A dictionary containing metadata about the request, such as output format,
+                         dimensions, and other relevant information.
+
+    Returns:
+        None
+
+    Raises:
+        IOError: If there is an error writing the image to a file.
+    """
+    try:
+        # Extract the output format from metadata (default to PNG)
+        # TODO: write custom logic for filename to be populated by metadata
+        output_format = metadata.get('output', {}).get('format', 'image/png').split('/')[-1]
+        filename = f"output_image.{output_format}"
+
+        # Write the image data to a file
+        with open(filename, 'wb') as f:
+            f.write(response.content)
+        print(f"Image successfully saved to {filename}")
+    except Exception as e:
+        print(f"Error writing image: {e}")
+
 def copernicus_sentiel_query():
     """Queries Sentinel-2 and Sentinel-1 data from the Copernicus Data Space Ecosystem.
 
@@ -160,71 +190,66 @@ def copernicus_sentiel_query():
     ACCESS_TOKEN = setup_auth()
     headers={f"Authorization" : f"Bearer {ACCESS_TOKEN}"}
 
-
     time_ranges = extract_time_ranges_from_eonet()
     coordinates = extract_eonet_coordinates()
 
     # Example code how to query copernicus sentiel 2 data and do explcit image processing evals with inline script.
     # Currently reading from the eo_net wildfire json file.
-    # Testing the first bbox and time range for now.
-    request = {
-    "input": {
-        "bounds": {
-            "properties": {"crs": "http://www.opengis.net/def/crs/EPSG/0/4326"},
-            "geometry": {
-            "type": "Polygon",
-                "coordinates": coordinates,
-            }
-        },
-        "data": [
-            {
-                "type": "sentinel-2-l2a",
-                "id": "l2a_t1",
-                "dataFilter": {
-                    "timeRange": {
-                        "from": time_ranges[0]["from"],
-                        "to": time_ranges[0]["to"],
-                    }
-                },
-            },
+    # TODO: need logic for long/lat to be converted to a proper bounding box
 
-        ]
-
-    },
-    "output": {
-        "width": 1024,
-        "height": 1024,
-    },
-
-    "evalscript": """
-      //VERSION=3
-
-        function setup() {
-        return {
-            input: ["B02", "B03", "B04", "B05", "B06", "B07", "B08", "B08a"],
+    evalscript = """
+    //VERSION=3
+    function setup() {
+    return {
+            input: ["B02", "B03", "B04", "B05", "B06", "B07", "B08"],
             output: {
-            bands: 8
+            bands: 7
             }
         };
-        }
+    }
 
-        function evaluatePixel(
-        sample,
-        scenes,
-        inputMetadata,
-        customData,
-        outputMetadata
-        ) {
-        return [sample];
-        }
+    function evaluatePixel(sample) {
+    return [2.5 * sample.B04, 2.5 * sample.B03, 2.5 * sample.B02]
+    }
+    """
 
-
-    """,
-
+    request = {
+        "input": {
+            "bounds": {
+                "properties": {"crs": "http://www.opengis.net/def/crs/EPSG/0/32633"},
+                "bbox": [
+                    408553.58,
+                    5078145.48,
+                    466081.02,
+                    5126576.61,
+                ],
+            },
+            "data": [
+                {
+                    "type": "sentinel-2-l2a",
+                    "dataFilter": {
+                        "timeRange": {
+                            "from": time_ranges[0]["from"],
+                            "to": time_ranges[0]["to"],
+                        }
+                    },
+                }
+            ],
+        },
+        "output": {
+            "width": 512,
+            "height": 512,
+            "format": "image/png"
+        },
+        "evalscript": evalscript,
     }
     url = "https://sh.dataspace.copernicus.eu/api/v1/process"
     response = requests.post(url, json=request, headers=headers)
-    print(response.content)
+
+    if response.status_code == 200:
+        write_image(response, metadata=request)
+    else:
+        print(f"{response.code}: error in request, outputting content for debugging {response.content}")
 
 def batch_data_downloader_selenium(url=None, max_pages=9):
     """Downloads images from a Flickr album using Selenium.
@@ -243,7 +268,7 @@ def batch_data_downloader_selenium(url=None, max_pages=9):
     driver.get(url)
     downloaded = 0
     last_height = driver.execute_script("return document.body.scrollHeight")
-    
+
     # TODO: figure out how to go past 100
     # either pagination or rate limit
     # might need to retrieve next page element.
