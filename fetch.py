@@ -23,12 +23,12 @@ def nasa_firms_api():
     The API key is retrieved from the environment variable `NASA_KEY`.
 
     https://firms.modaps.eosdis.nasa.gov/api/ Fire Information for Resource Management System
-    /api/area/csv/[NASA_KEy]/[SOURCE]/[AREA_COORDINATES]/[DAY_RANGE]/[DATE]
+    /api/area/csv/[NASA_KEY]/[SOURCE]/[AREA_COORDINATES]/[DAY_RANGE]/[DATE]
 
     Returns:
         pd.DataFrame: A DataFrame containing the data availability information for NASA FIRMS.
     """
-    # TODO: Implement AREA_COORDINATES and DAY_RANGE etc. paramters for API call
+    # TODO: Implement AREA_COORDINATES and DAY_RANGE etc. parameters for API call
     NASA_KEY = os.getenv("NASA_KEY")
     data_url = 'https://firms.modaps.eosdis.nasa.gov/api/data_availability/csv/' + NASA_KEY + '/all'
     data_frame = pd.read_csv(data_url)
