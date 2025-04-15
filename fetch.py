@@ -8,10 +8,12 @@ import json
 import time
 import os
 
+
 from oauthlib.oauth2 import BackendApplicationClient
 from requests_oauthlib import OAuth2Session
 
 import pandas as pd
+import pygeohash as pgh
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 
@@ -161,15 +163,47 @@ def write_image(response, metadata):
     try:
         # Extract the output format from metadata (default to PNG)
         # TODO: write custom logic for filename to be populated by metadata
-        output_format = metadata.get('output', {}).get('format', 'image/png').split('/')[-1]
-        filename = f"output_image.{output_format}"
+        output_format = metadata.get('output', {}).get('format', 'image/tiff').split('/')[-1]
 
+        # use Location uuid a
+        for k, v in metadata.items():
+            print(k)
+            print(v)
+        # filename = f"{metadata)}_.{output_format}"
         # Write the image data to a file
-        with open(filename, 'wb') as f:
-            f.write(response.content)
-        print(f"Image successfully saved to {filename}")
+        # with open(filename, 'wb') as f:
+        #     f.write(response.content)
+        # print(f"Image successfully saved to {filename}")
     except Exception as e:
         print(f"Error writing image: {e}")
+
+class Location:
+    def __init__(self, coordinates, time, geohash=None, bbox=None):
+        self.coordinates = coordinates
+        self.time = time
+        self.geohash = self.create_geohash(coordinates)
+        if bbox:
+            self.bbox = bbox
+    def create_geohash(coordinates):
+        geohash = pgh.encode(latitude=coordinates[0], longitude=coordinates[1])
+        print(geohash)  # 'ezs42e44yx96'
+        return geohash
+
+
+def create_locations(amount=0):
+
+    # list of dict entries in the form {'from': '2023-08-05T17:59:00Z', 'to': '2023-08-07T17:59:00Z'}
+    locations = []
+    time_ranges = extract_time_ranges_from_eonet()
+    coordinates = extract_eonet_coordinates()
+    print(coordinates)
+    for i in range(amount):
+        print(i)
+        location = Location(coordinates[i], time=time_ranges[i])
+        locations.append(location)
+
+
+    return locations
 
 def copernicus_sentiel_query():
     """Queries Sentinel-2 and Sentinel-1 data from the Copernicus Data Space Ecosystem.
@@ -190,8 +224,9 @@ def copernicus_sentiel_query():
     ACCESS_TOKEN = setup_auth()
     headers={f"Authorization" : f"Bearer {ACCESS_TOKEN}"}
 
-    time_ranges = extract_time_ranges_from_eonet()
-    coordinates = extract_eonet_coordinates()
+    locations = create_locations()
+    for location in locations:
+        print(location)
 
     # Example code how to query copernicus sentiel 2 data and do explcit image processing evals with inline script.
     # Currently reading from the eo_net wildfire json file.
@@ -201,7 +236,7 @@ def copernicus_sentiel_query():
     //VERSION=3
     function setup() {
     return {
-            input: ["B02", "B03", "B04", "B05", "B06", "B07", "B08"],
+            input: ["B02", "B03", "B04", "B08"],
             output: {
             bands: 7
             }
@@ -239,7 +274,7 @@ def copernicus_sentiel_query():
         "output": {
             "width": 512,
             "height": 512,
-            "format": "image/png"
+            "format": "image/tiff"
         },
         "evalscript": evalscript,
     }
@@ -298,3 +333,4 @@ def batch_data_downloader_selenium(url=None, max_pages=9):
         last_height = new_height
     driver.quit()
     return downloaded
+
