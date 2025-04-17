@@ -164,28 +164,25 @@ def write_image(response, metadata, location):
     """
     try:
         # Extract the output format from metadata (default to PNG)
-        # TODO: write custom logic for filename to be populated by metadata
         output_format = metadata.get('output', {}).get('format', 'image/png').split('/')[-1]
+        # TODO: write custom logic for filename to be populated by metadata satellite type and bands
+        filename = f"./data/copernicus/{location.geohash}.{output_format}"
 
-
-        filename = f"./data/{location.geohash}.{output_format}"
-        # Write the image data to a file
+        # Write the reponse content data to a image file
         with open(filename, 'wb') as f:
             f.write(response.content)
         print(f"Image successfully saved to {filename}")
     except Exception as e:
         print(f"Error writing image: {e}")
 
-
-
-def convert_coords_to_bbox(longitude, latitude, buffer_distance=500):
+def convert_coords_to_bbox(longitude, latitude, buffer_distance=2):
     """
     Converts longitude and latitude to a bounding box (bbox).
 
     Args:
         longitude (float): Longitude of the central point.
         latitude (float): Latitude of the central point.
-        buffer_distance (float): Buffer distance in meters for the bbox. Default is 50,000 meters.
+        buffer_distance (float): Buffer distance in meters for the bbox. Default is 2 meters.
 
     Returns:
         dict: A dictionary containing the bbox as a list of coordinates.
@@ -205,7 +202,6 @@ def convert_coords_to_bbox(longitude, latitude, buffer_distance=500):
 
     # Transform the bbox corners back to WGS84 if needed
     bbox = [x_min, y_min, x_max, y_max]
-
     return {"bbox": bbox}
 
 class Location:
@@ -213,31 +209,32 @@ class Location:
         self.coordinates = coordinates
         self.time = time
         self.geohash = self.create_geohash(coordinates)
-
         self.bbox = convert_coords_to_bbox(coordinates[0], coordinates[1])
     def create_geohash(self, coordinates):
-        print(coordinates[0])
-        print(coordinates[1])
         geohash = pgh.encode(latitude=coordinates[0], longitude=coordinates[1])
         return geohash
 
-
-
-
 def create_locations(amount=5):
+    """Creates a list of Location objects based on EONET data.
+
+    This function extracts time ranges and coordinates from the EONET wildfire data
+    and uses them to create Location objects. The number of locations created is
+    determined by the `amount` parameter.
+
+    Args:
+        amount (int): The number of Location objects to create. Defaults to 5.
+
+    Returns:
+        list: A list of Location objects.
+    """
     # list of dict entries in the form {'from': '2023-08-05T17:59:00Z', 'to': '2023-08-07T17:59:00Z'}
     locations = []
     time_ranges = extract_time_ranges_from_eonet()
-    print(len(time_ranges))
     coordinates = extract_eonet_coordinates()
-    print(len(coordinates[0]))
-
-    for i in range(amount):
-        print(i)
-        location = Location(coordinates[0][i], time=time_ranges[i])
+    # amount is a pre-determined parameter. the current value is arbitrary at this point
+    for entry in range(amount):
+        location = Location(coordinates[0][entry], time=time_ranges[entry])
         locations.append(location)
-
-
     return locations
 
 def copernicus_sentiel_query():
@@ -250,7 +247,7 @@ def copernicus_sentiel_query():
     B2: Blue
     B3: Green
     B4: Red
-    B5-B8, B8a Visible and Near Infared (VNIR)
+    B8: Visible and Near Infared (VNIR)
 
     Returns:
         None
@@ -260,10 +257,6 @@ def copernicus_sentiel_query():
     headers={f"Authorization" : f"Bearer {ACCESS_TOKEN}"}
 
     locations = create_locations()
-    for location in locations:
-        print(location.bbox)
-
-
 
     # Example code how to query copernicus sentiel 2 data and do explcit image processing evals with inline script.
     # Currently reading from the eo_net wildfire json file.
@@ -273,28 +266,23 @@ def copernicus_sentiel_query():
     //VERSION=3
     function setup() {
     return {
-            input: ["B02", "B03", "B04", "B08"],
+            input: ["B02", "B03", "B04"],
             output: {
-            bands: 7
-            }
+            bands: 3
+            },
+
         };
     }
 
     function evaluatePixel(sample) {
-    // Why magic number 2.5?
-    return [2.5 * sample.B04, 2.5 * sample.B03, 2.5 * sample.B02]
+    return [sample.B04, sample.B03, sample.B02];
     }
     """
 
     request = {
         "input": {
-            #  "coordinates":
-            #         locations[0].coordinates,
-
             "bounds": {
                 "properties": {"crs": "http://www.opengis.net/def/crs/EPSG/0/32633"},
-            #     "coordinates":
-            #         locations[0].coordinates,
                 "bbox": locations[0].bbox['bbox']
 
             },
