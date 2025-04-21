@@ -16,7 +16,7 @@ import pandas as pd
 import pygeohash as pgh
 from selenium import webdriver
 from selenium.webdriver.common.by import By
-from pyproj import Proj, transform
+from pyproj import Proj, Transformer
 
 
 def nasa_firms_api():
@@ -145,7 +145,7 @@ def extract_time_ranges_from_eonet(file_path='events/categories.json'):
         print(f"Error extracting time ranges: {e}")
         return []
 
-def write_image(response, metadata, location):
+def write_image(response, metadata, location=None):
     """Writes image data from an API response to a file.
 
     This function extracts image data (e.g., PNG) from the response object and writes it to a file.
@@ -164,9 +164,10 @@ def write_image(response, metadata, location):
     """
     try:
         # Extract the output format from metadata (default to PNG)
-        output_format = metadata.get('output', {}).get('format', 'image/png').split('/')[-1]
+        output_format = metadata.get('output', {}).get('format', 'image/tiff').split('/')[-1]
         # TODO: write custom logic for filename to be populated by metadata satellite type and bands
-        filename = f"./data/copernicus/{location.geohash}.{output_format}"
+        filename = f"./data/{location.geohash}.{output_format}"
+        # filename = f"./data/test.{output_format}"
 
         # Write the reponse content data to a image file
         with open(filename, 'wb') as f:
@@ -175,34 +176,31 @@ def write_image(response, metadata, location):
     except Exception as e:
         print(f"Error writing image: {e}")
 
-def convert_coords_to_bbox(longitude, latitude, buffer_distance=2):
-    """
-    Converts longitude and latitude to a bounding box (bbox).
-
-    Args:
-        longitude (float): Longitude of the central point.
-        latitude (float): Latitude of the central point.
-        buffer_distance (float): Buffer distance in meters for the bbox. Default is 2 meters.
-
-    Returns:
-        dict: A dictionary containing the bbox as a list of coordinates.
-    """
-    # Define the projection for WGS84 (lat/lon) and a local UTM projection
+def convert_coords_to_bbox(longitude, latitude, buffer_distance=500):
     wgs84 = Proj(proj="latlong", datum="WGS84")
-    utm = Proj(proj="utm", zone=int((longitude + 180) / 6) + 1, datum="WGS84")
+    utm_zone = int((longitude + 180) / 6) + 1
+    utm = Proj(proj="utm", zone=utm_zone, datum="WGS84")
 
-    # Transform the central point to UTM coordinates
-    x_center, y_center = transform(wgs84, utm, longitude, latitude)
+    transformer_to_utm = Transformer.from_proj(wgs84, utm, always_xy=True)
+    transformer_to_wgs84 = Transformer.from_proj(utm, wgs84, always_xy=True)
 
-    # Calculate the bbox in UTM coordinates
+    x_center, y_center = transformer_to_utm.transform(longitude, latitude)
+
+    if not all(map(lambda x: abs(x) < 1e8, [x_center, y_center])):
+        raise ValueError("UTM transform failed. Check input coordinates.")
+
     x_min = x_center - buffer_distance
     x_max = x_center + buffer_distance
     y_min = y_center - buffer_distance
     y_max = y_center + buffer_distance
 
-    # Transform the bbox corners back to WGS84 if needed
-    bbox = [x_min, y_min, x_max, y_max]
-    return {"bbox": bbox}
+    sw_lon, sw_lat = transformer_to_wgs84.transform(x_min, y_min)
+    ne_lon, ne_lat = transformer_to_wgs84.transform(x_max, y_max)
+
+    return {
+        "bbox": [sw_lon, sw_lat, ne_lon, ne_lat]
+    }
+
 
 class Location:
     def __init__(self, coordinates, time, geohash=None, bbox=None):
@@ -210,11 +208,12 @@ class Location:
         self.time = time
         self.geohash = self.create_geohash(coordinates)
         self.bbox = convert_coords_to_bbox(coordinates[0], coordinates[1])
+        print(self.bbox)
     def create_geohash(self, coordinates):
         geohash = pgh.encode(latitude=coordinates[0], longitude=coordinates[1])
         return geohash
 
-def create_locations(amount=5):
+def create_locations(amount=15):
     """Creates a list of Location objects based on EONET data.
 
     This function extracts time ranges and coordinates from the EONET wildfire data
@@ -237,6 +236,25 @@ def create_locations(amount=5):
         locations.append(location)
     return locations
 
+def validate_query(target, auth):
+    date = f"{target.time['from']}/.."
+    print(date)
+
+
+
+    data = {
+    "bbox": target.bbox['bbox'],
+    "datetime": date,
+    "collections": ["sentinel-2-l2a"],
+    "limit": 10,
+    "fields": {"include": ["properties.gsd"]},
+}
+
+
+    url = "https://sh.dataspace.copernicus.eu/api/v1/catalog/1.0.0/search"
+    response = requests.post(url, json=data, headers=auth)
+    print(response.content)
+
 def copernicus_sentiel_query():
     """Queries Sentinel-2 and Sentinel-1 data from the Copernicus Data Space Ecosystem.
 
@@ -244,10 +262,10 @@ def copernicus_sentiel_query():
     and retrieves data for a specified bounding box and time range.
 
     Sentiel-2 bands of interest
-    B2: Blue
-    B3: Green
-    B4: Red
-    B8: Visible and Near Infared (VNIR)
+    B02: Blue
+    B03: Green
+    B04: Red
+    B08: Visible and Near Infared (VNIR)
 
     Returns:
         None
@@ -257,61 +275,72 @@ def copernicus_sentiel_query():
     headers={f"Authorization" : f"Bearer {ACCESS_TOKEN}"}
 
     locations = create_locations()
+    # for location in locations:
+    #     validate_query(location, headers)
+
+
 
     # Example code how to query copernicus sentiel 2 data and do explcit image processing evals with inline script.
     # Currently reading from the eo_net wildfire json file.
     # TODO: need logic for long/lat to be converted to a proper bounding box
 
-    evalscript = """
-    //VERSION=3
-    function setup() {
-    return {
-            input: ["B02", "B03", "B04"],
-            output: {
-            bands: 3
+
+    for location in locations:
+
+        evalscript = """
+        //VERSION=3
+        function setup() {
+        return {
+                input: ["B08", "B02", "B03", "B04"],
+                output: {
+                bands: 4
+                },
+
+            };
+        }
+
+        function evaluatePixel(sample) {
+        return [sample.B08, sample.B04, sample.B03, sample.B02];
+        }
+        """
+
+        request = {
+            "input": {
+                "bounds": {
+                    # "properties": {"crs": "http://www.opengis.net/def/crs/EPSG/0/32633"},
+                    # "bbox": [13, 45, 14, 46],
+                    "bbox": location.bbox['bbox']
+
+                },
+                "data": [
+                    {
+                        "type": "sentinel-2-l2a",
+                        "dataFilter": {
+                            "timeRange": {
+                                "from": location.time["from"],
+                                # "to": location.time["to"],
+                            }
+                        },
+                    }
+                ],
             },
-
-        };
-    }
-
-    function evaluatePixel(sample) {
-    return [sample.B04, sample.B03, sample.B02];
-    }
-    """
-
-    request = {
-        "input": {
-            "bounds": {
-                "properties": {"crs": "http://www.opengis.net/def/crs/EPSG/0/32633"},
-                "bbox": locations[0].bbox['bbox']
-
+            "output": {
+                "width": 512,
+                "height": 512,
+                "format": "image/tiff"
             },
-            "data": [
-                {
-                    "type": "sentinel-2-l2a",
-                    "dataFilter": {
-                        "timeRange": {
-                            "from": locations[0].time["from"],
-                            "to": locations[0].time["to"],
-                        }
-                    },
-                }
-            ],
-        },
-        "output": {
-            "width": 512,
-            "height": 512,
-            "format": "image/png"
-        },
-        "evalscript": evalscript,
-    }
-    url = "https://sh.dataspace.copernicus.eu/api/v1/process"
-    response = requests.post(url, json=request, headers=headers)
+            "evalscript": evalscript,
+        }
+        url = "https://sh.dataspace.copernicus.eu/api/v1/process"
+        response = requests.post(url, json=request, headers=headers)
 
-    if response.status_code == 200:
-        write_image(response, metadata=request, location=locations[0])
-    else:
-        print(f"{response.status_code}: error in request, outputting content for debugging {response.content}")
+        if response.status_code == 200:
+            # write_image(response, metadata=request, location=locations[4])
+            write_image(response, metadata=request, location=location)
+
+            print(request)
+        else:
+            print(f"{response.status_code}: error in request, outputting content for debugging {response.content}")
 
 def batch_data_downloader_selenium(url=None, max_pages=9):
     """Downloads images from a Flickr album using Selenium.
