@@ -148,7 +148,7 @@ def extract_time_ranges_from_eonet(file_path='events/categories.json'):
 def write_image(response, metadata, location=None):
     """Writes image data from an API response to a file.
 
-    This function extracts image data (e.g., PNG) from the response object and writes it to a file.
+    This function extracts image data (e.g., TIFF) from the response object and writes it to a file.
     The filename is generated based on the metadata provided, such as the output format.
 
     Args:
@@ -163,10 +163,10 @@ def write_image(response, metadata, location=None):
         IOError: If there is an error writing the image to a file.
     """
     try:
-        # Extract the output format from metadata (default to PNG)
+        # Extract the output format from metadata (default to TIFF)
         output_format = metadata.get('output', {}).get('format', 'image/tiff').split('/')[-1]
         # TODO: write custom logic for filename to be populated by metadata satellite type and bands
-        filename = f"./data/{location.geohash}.{output_format}"
+        filename = f"./data/eonet_fire_events/current/{location.geohash}.{output_format}"
         # filename = f"./data/test.{output_format}"
 
         # Write the reponse content data to a image file
@@ -176,7 +176,7 @@ def write_image(response, metadata, location=None):
     except Exception as e:
         print(f"Error writing image: {e}")
 
-def convert_coords_to_bbox(longitude, latitude, buffer_distance=500):
+def convert_coords_to_bbox(longitude, latitude, buffer_distance=5000):
     wgs84 = Proj(proj="latlong", datum="WGS84")
     utm_zone = int((longitude + 180) / 6) + 1
     utm = Proj(proj="utm", zone=utm_zone, datum="WGS84")
@@ -201,7 +201,6 @@ def convert_coords_to_bbox(longitude, latitude, buffer_distance=500):
         "bbox": [sw_lon, sw_lat, ne_lon, ne_lat]
     }
 
-
 class Location:
     def __init__(self, coordinates, time, geohash=None, bbox=None):
         self.coordinates = coordinates
@@ -213,7 +212,7 @@ class Location:
         geohash = pgh.encode(latitude=coordinates[0], longitude=coordinates[1])
         return geohash
 
-def create_locations(amount=15):
+def create_locations(amount=100):
     """Creates a list of Location objects based on EONET data.
 
     This function extracts time ranges and coordinates from the EONET wildfire data
@@ -237,20 +236,19 @@ def create_locations(amount=15):
     return locations
 
 def validate_query(target, auth):
+    """Vaildiate data availibitly for the given location parameters.
+    Args:
+        target (Location): Location object to check database for (specifically time range and bbox)
+        auth (dict): Dict of oauth HTTP header request info.
+    """
     date = f"{target.time['from']}/.."
-    print(date)
-
-
-
     data = {
-    "bbox": target.bbox['bbox'],
-    "datetime": date,
-    "collections": ["sentinel-2-l2a"],
-    "limit": 10,
-    "fields": {"include": ["properties.gsd"]},
-}
-
-
+        "bbox": target.bbox['bbox'],
+        "datetime": date,
+        "collections": ["sentinel-2-l2a"],
+        "limit": 10,
+        "fields": {"include": ["properties.gsd"]},
+    }
     url = "https://sh.dataspace.copernicus.eu/api/v1/catalog/1.0.0/search"
     response = requests.post(url, json=data, headers=auth)
     print(response.content)
@@ -275,23 +273,18 @@ def copernicus_sentiel_query():
     headers={f"Authorization" : f"Bearer {ACCESS_TOKEN}"}
 
     locations = create_locations()
-    # for location in locations:
-    #     validate_query(location, headers)
-
-
 
     # Example code how to query copernicus sentiel 2 data and do explcit image processing evals with inline script.
     # Currently reading from the eo_net wildfire json file.
-    # TODO: need logic for long/lat to be converted to a proper bounding box
 
-
+    # TODO incorprate evalscript for fire mask from Sentinel-3 SLSTR L1B for QC purposes
+    # bands F1,F2
     for location in locations:
-
         evalscript = """
         //VERSION=3
         function setup() {
         return {
-                input: ["B08", "B02", "B03", "B04"],
+                input: [ "B08", "B04", "B03", "B02"],
                 output: {
                 bands: 4
                 },
@@ -300,7 +293,7 @@ def copernicus_sentiel_query():
         }
 
         function evaluatePixel(sample) {
-        return [sample.B08, sample.B04, sample.B03, sample.B02];
+        return [2.5 * sample.B08, 2.5 * sample.B04, 2.5 * sample.B03, 2.5 * sample.B02];
         }
         """
 
@@ -317,8 +310,8 @@ def copernicus_sentiel_query():
                         "type": "sentinel-2-l2a",
                         "dataFilter": {
                             "timeRange": {
-                                "from": location.time["from"],
-                                # "to": location.time["to"],
+                                "from": location.time["to"],
+                                "to": location.time["from"],
                             }
                         },
                     }
