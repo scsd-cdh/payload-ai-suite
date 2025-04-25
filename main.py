@@ -48,7 +48,7 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
     if args.run_model:
-        model.run()
+        model.train()
     elif args.nasa_firms:
         nasa_firms_api()
     elif args.setup_auth:

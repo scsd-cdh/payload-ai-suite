@@ -36,7 +36,6 @@ def nasa_firms_api():
     NASA_KEY = os.getenv("NASA_KEY")
     data_url = 'https://firms.modaps.eosdis.nasa.gov/api/data_availability/csv/' + NASA_KEY + '/all'
     data_frame = pd.read_csv(data_url)
-    print(data_frame)
     return data_frame
 
 
@@ -164,9 +163,9 @@ def write_image(response, metadata, location=None):
     """
     try:
         # Extract the output format from metadata (default to TIFF)
-        output_format = metadata.get('output', {}).get('format', 'image/tiff').split('/')[-1]
+        output_format = metadata.get('output', {}).get('format', 'image/png').split('/')[-1]
         # TODO: write custom logic for filename to be populated by metadata satellite type and bands
-        filename = f"./data/eonet_fire_events/current/{location.geohash}.{output_format}"
+        filename = f"./data/eonet_fire_events/{location.geohash}.{output_format}"
         # filename = f"./data/test.{output_format}"
 
         # Write the reponse content data to a image file
@@ -205,6 +204,7 @@ class Location:
     def __init__(self, coordinates, time, geohash=None, bbox=None):
         self.coordinates = coordinates
         self.time = time
+        print(self.time)
         self.geohash = self.create_geohash(coordinates)
         self.bbox = convert_coords_to_bbox(coordinates[0], coordinates[1])
         print(self.bbox)
@@ -212,7 +212,7 @@ class Location:
         geohash = pgh.encode(latitude=coordinates[0], longitude=coordinates[1])
         return geohash
 
-def create_locations(amount=100):
+def create_locations(amount=125):
     """Creates a list of Location objects based on EONET data.
 
     This function extracts time ranges and coordinates from the EONET wildfire data
@@ -231,6 +231,8 @@ def create_locations(amount=100):
     coordinates = extract_eonet_coordinates()
     # amount is a pre-determined parameter. the current value is arbitrary at this point
     for entry in range(amount):
+        if entry < 100:
+            continue
         location = Location(coordinates[0][entry], time=time_ranges[entry])
         locations.append(location)
     return locations
@@ -265,6 +267,8 @@ def copernicus_sentiel_query():
     B04: Red
     B08: Visible and Near Infared (VNIR)
 
+    Sentiel-3 bands of interest
+
     Returns:
         None
     """
@@ -279,7 +283,17 @@ def copernicus_sentiel_query():
 
     # TODO incorprate evalscript for fire mask from Sentinel-3 SLSTR L1B for QC purposes
     # bands F1,F2
+    # Also, check for null data
+
+
+
+
+    sensor = "sentinel-2-l2a"
+
+
+
     for location in locations:
+
         evalscript = """
         //VERSION=3
         function setup() {
@@ -297,6 +311,7 @@ def copernicus_sentiel_query():
         }
         """
 
+
         request = {
             "input": {
                 "bounds": {
@@ -307,11 +322,11 @@ def copernicus_sentiel_query():
                 },
                 "data": [
                     {
-                        "type": "sentinel-2-l2a",
+                        "type": sensor,
                         "dataFilter": {
                             "timeRange": {
-                                "from": location.time["to"],
-                                "to": location.time["from"],
+                                "from": location.time["from"],
+                                "to": location.time["to"],
                             }
                         },
                     }
@@ -320,7 +335,7 @@ def copernicus_sentiel_query():
             "output": {
                 "width": 512,
                 "height": 512,
-                "format": "image/tiff"
+                "format": "image/png"
             },
             "evalscript": evalscript,
         }
@@ -328,7 +343,6 @@ def copernicus_sentiel_query():
         response = requests.post(url, json=request, headers=headers)
 
         if response.status_code == 200:
-            # write_image(response, metadata=request, location=locations[4])
             write_image(response, metadata=request, location=location)
 
             print(request)
