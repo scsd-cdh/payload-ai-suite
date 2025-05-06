@@ -3,15 +3,13 @@ matplotlib==3.5.1
 numpy==1.21.5
 oauthlib==3.2.0
 onnx==1.17.0
+onnxruntime==1.20.1
 pandas==2.2.3
+pygeohash==3.0.1
+pyproj==3.7.1
 Requests==2.32.3
 requests_oauthlib==2.0.0
 scikit_learn==1.6.1
 selenium==4.32.0
 tensorflow==2.18.0
 tf2onnx==1.16.1
-<<<<<<< HEAD
-=======
-torch==2.5.1+cu118
-pygeohash==-3.0.1
->>>>>>> 03f5f258ece00478f3aa98d6b91574c587bb0110
