@@ -10,3 +10,8 @@ scikit_learn==1.6.1
 selenium==4.32.0
 tensorflow==2.18.0
 tf2onnx==1.16.1
+<<<<<<< HEAD
+=======
+torch==2.5.1+cu118
+pygeohash==-3.0.1
+>>>>>>> 03f5f258ece00478f3aa98d6b91574c587bb0110

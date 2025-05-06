@@ -8,12 +8,16 @@ import json
 import time
 import os
 
+
 from oauthlib.oauth2 import BackendApplicationClient
 from requests_oauthlib import OAuth2Session
 
 import pandas as pd
+import pygeohash as pgh
 from selenium import webdriver
 from selenium.webdriver.common.by import By
+from pyproj import Proj, Transformer
+
 
 def nasa_firms_api():
     """
@@ -32,7 +36,6 @@ def nasa_firms_api():
     NASA_KEY = os.getenv("NASA_KEY")
     data_url = 'https://firms.modaps.eosdis.nasa.gov/api/data_availability/csv/' + NASA_KEY + '/all'
     data_frame = pd.read_csv(data_url)
-    print(data_frame)
     return data_frame
 
 
@@ -141,10 +144,10 @@ def extract_time_ranges_from_eonet(file_path='events/categories.json'):
         print(f"Error extracting time ranges: {e}")
         return []
 
-def write_image(response, metadata):
+def write_image(response, metadata, location=None):
     """Writes image data from an API response to a file.
 
-    This function extracts image data (e.g., PNG) from the response object and writes it to a file.
+    This function extracts image data (e.g., TIFF) from the response object and writes it to a file.
     The filename is generated based on the metadata provided, such as the output format.
 
     Args:
@@ -159,17 +162,98 @@ def write_image(response, metadata):
         IOError: If there is an error writing the image to a file.
     """
     try:
-        # Extract the output format from metadata (default to PNG)
-        # TODO: write custom logic for filename to be populated by metadata
+        # Extract the output format from metadata (default to TIFF)
         output_format = metadata.get('output', {}).get('format', 'image/png').split('/')[-1]
-        filename = f"output_image.{output_format}"
+        # TODO: write custom logic for filename to be populated by metadata satellite type and bands
+        filename = f"./data/eonet_fire_events/{location.geohash}.{output_format}"
+        # filename = f"./data/test.{output_format}"
 
-        # Write the image data to a file
+        # Write the reponse content data to a image file
         with open(filename, 'wb') as f:
             f.write(response.content)
         print(f"Image successfully saved to {filename}")
     except Exception as e:
         print(f"Error writing image: {e}")
+
+def convert_coords_to_bbox(longitude, latitude, buffer_distance=5000):
+    wgs84 = Proj(proj="latlong", datum="WGS84")
+    utm_zone = int((longitude + 180) / 6) + 1
+    utm = Proj(proj="utm", zone=utm_zone, datum="WGS84")
+
+    transformer_to_utm = Transformer.from_proj(wgs84, utm, always_xy=True)
+    transformer_to_wgs84 = Transformer.from_proj(utm, wgs84, always_xy=True)
+
+    x_center, y_center = transformer_to_utm.transform(longitude, latitude)
+
+    if not all(map(lambda x: abs(x) < 1e8, [x_center, y_center])):
+        raise ValueError("UTM transform failed. Check input coordinates.")
+
+    x_min = x_center - buffer_distance
+    x_max = x_center + buffer_distance
+    y_min = y_center - buffer_distance
+    y_max = y_center + buffer_distance
+
+    sw_lon, sw_lat = transformer_to_wgs84.transform(x_min, y_min)
+    ne_lon, ne_lat = transformer_to_wgs84.transform(x_max, y_max)
+
+    return {
+        "bbox": [sw_lon, sw_lat, ne_lon, ne_lat]
+    }
+
+class Location:
+    def __init__(self, coordinates, time, geohash=None, bbox=None):
+        self.coordinates = coordinates
+        self.time = time
+        print(self.time)
+        self.geohash = self.create_geohash(coordinates)
+        self.bbox = convert_coords_to_bbox(coordinates[0], coordinates[1])
+        print(self.bbox)
+    def create_geohash(self, coordinates):
+        geohash = pgh.encode(latitude=coordinates[0], longitude=coordinates[1])
+        return geohash
+
+def create_locations(amount=125):
+    """Creates a list of Location objects based on EONET data.
+
+    This function extracts time ranges and coordinates from the EONET wildfire data
+    and uses them to create Location objects. The number of locations created is
+    determined by the `amount` parameter.
+
+    Args:
+        amount (int): The number of Location objects to create. Defaults to 5.
+
+    Returns:
+        list: A list of Location objects.
+    """
+    # list of dict entries in the form {'from': '2023-08-05T17:59:00Z', 'to': '2023-08-07T17:59:00Z'}
+    locations = []
+    time_ranges = extract_time_ranges_from_eonet()
+    coordinates = extract_eonet_coordinates()
+    # amount is a pre-determined parameter. the current value is arbitrary at this point
+    for entry in range(amount):
+        if entry < 100:
+            continue
+        location = Location(coordinates[0][entry], time=time_ranges[entry])
+        locations.append(location)
+    return locations
+
+def validate_query(target, auth):
+    """Vaildiate data availibitly for the given location parameters.
+    Args:
+        target (Location): Location object to check database for (specifically time range and bbox)
+        auth (dict): Dict of oauth HTTP header request info.
+    """
+    date = f"{target.time['from']}/.."
+    data = {
+        "bbox": target.bbox['bbox'],
+        "datetime": date,
+        "collections": ["sentinel-2-l2a"],
+        "limit": 10,
+        "fields": {"include": ["properties.gsd"]},
+    }
+    url = "https://sh.dataspace.copernicus.eu/api/v1/catalog/1.0.0/search"
+    response = requests.post(url, json=data, headers=auth)
+    print(response.content)
 
 def copernicus_sentiel_query():
     """Queries Sentinel-2 and Sentinel-1 data from the Copernicus Data Space Ecosystem.
@@ -178,10 +262,12 @@ def copernicus_sentiel_query():
     and retrieves data for a specified bounding box and time range.
 
     Sentiel-2 bands of interest
-    B2: Blue
-    B3: Green
-    B4: Red
-    B5-B8, B8a Visible and Near Infared (VNIR)
+    B02: Blue
+    B03: Green
+    B04: Red
+    B08: Visible and Near Infared (VNIR)
+
+    Sentiel-3 bands of interest
 
     Returns:
         None
@@ -190,66 +276,78 @@ def copernicus_sentiel_query():
     ACCESS_TOKEN = setup_auth()
     headers={f"Authorization" : f"Bearer {ACCESS_TOKEN}"}
 
-    time_ranges = extract_time_ranges_from_eonet()
-    coordinates = extract_eonet_coordinates()
+    locations = create_locations()
 
     # Example code how to query copernicus sentiel 2 data and do explcit image processing evals with inline script.
     # Currently reading from the eo_net wildfire json file.
-    # TODO: need logic for long/lat to be converted to a proper bounding box
 
-    evalscript = """
-    //VERSION=3
-    function setup() {
-    return {
-            input: ["B02", "B03", "B04", "B05", "B06", "B07", "B08"],
-            output: {
-            bands: 7
-            }
-        };
-    }
+    # TODO incorprate evalscript for fire mask from Sentinel-3 SLSTR L1B for QC purposes
+    # bands F1,F2
+    # Also, check for null data
 
-    function evaluatePixel(sample) {
-    return [2.5 * sample.B04, 2.5 * sample.B03, 2.5 * sample.B02]
-    }
-    """
 
-    request = {
-        "input": {
-            "bounds": {
-                "properties": {"crs": "http://www.opengis.net/def/crs/EPSG/0/32633"},
-                "bbox": [
-                    408553.58,
-                    5078145.48,
-                    466081.02,
-                    5126576.61,
+
+
+    sensor = "sentinel-2-l2a"
+
+
+
+    for location in locations:
+
+        evalscript = """
+        //VERSION=3
+        function setup() {
+        return {
+                input: [ "B08", "B04", "B03", "B02"],
+                output: {
+                bands: 4
+                },
+
+            };
+        }
+
+        function evaluatePixel(sample) {
+        return [2.5 * sample.B08, 2.5 * sample.B04, 2.5 * sample.B03, 2.5 * sample.B02];
+        }
+        """
+
+
+        request = {
+            "input": {
+                "bounds": {
+                    # "properties": {"crs": "http://www.opengis.net/def/crs/EPSG/0/32633"},
+                    # "bbox": [13, 45, 14, 46],
+                    "bbox": location.bbox['bbox']
+
+                },
+                "data": [
+                    {
+                        "type": sensor,
+                        "dataFilter": {
+                            "timeRange": {
+                                "from": location.time["from"],
+                                "to": location.time["to"],
+                            }
+                        },
+                    }
                 ],
             },
-            "data": [
-                {
-                    "type": "sentinel-2-l2a",
-                    "dataFilter": {
-                        "timeRange": {
-                            "from": time_ranges[0]["from"],
-                            "to": time_ranges[0]["to"],
-                        }
-                    },
-                }
-            ],
-        },
-        "output": {
-            "width": 512,
-            "height": 512,
-            "format": "image/png"
-        },
-        "evalscript": evalscript,
-    }
-    url = "https://sh.dataspace.copernicus.eu/api/v1/process"
-    response = requests.post(url, json=request, headers=headers)
+            "output": {
+                "width": 512,
+                "height": 512,
+                "format": "image/png"
+            },
+            "evalscript": evalscript,
+        }
+        url = "https://sh.dataspace.copernicus.eu/api/v1/process"
+        response = requests.post(url, json=request, headers=headers)
 
-    if response.status_code == 200:
-        write_image(response, metadata=request)
-    else:
-        print(f"{response.code}: error in request, outputting content for debugging {response.content}")
+        if response.status_code == 200:
+            write_image(response, metadata=request, location=location)
+
+            print(request)
+        else:
+            print(f"{response.status_code}: error in request, outputting content for debugging {response.content}")
 
 def batch_data_downloader_selenium(url=None, max_pages=9):
     """Downloads images from a Flickr album using Selenium.
@@ -298,3 +396,4 @@ def batch_data_downloader_selenium(url=None, max_pages=9):
         last_height = new_height
     driver.quit()
     return downloaded
+

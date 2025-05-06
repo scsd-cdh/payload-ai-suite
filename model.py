@@ -17,12 +17,13 @@ import preprocess
 import tf2onnx
 import onnx
 import numpy as np
+import onnxruntime as rt
 from sklearn import preprocessing
 from sklearn.model_selection import train_test_split
 import matplotlib.pyplot as plt
 
 
-def train(validate=False, epochs=2):
+def train(validate=True, epochs=20):
     """
     Train CNN VGG model on labeled data.
 
@@ -85,6 +86,7 @@ def train(validate=False, epochs=2):
     num_classes = 2
     head = create_top(vgg, num_classes)
     model = keras.models.Model(inputs=vgg.input, outputs=head)
+
     print(model.summary())
     model.compile(optimizer='adam', loss='categorical_crossentropy', metrics=['accuracy'])
     history = model.fit(X_train, y_train,
@@ -109,7 +111,6 @@ def train(validate=False, epochs=2):
         plt.figure()
         plt.show()
 
-
 def export_to_onnx(model):
     """
     Export the trained model to ONNX format.
@@ -133,3 +134,12 @@ def export_to_onnx(model):
         opset=13  # Specify ONNX opset version
     )
     onnx.save(onnx_model, 'zetane.onnx')
+
+def run_inference(onnx_model="zetane.onnx", data_target=None):
+    if not data_target.any():
+        print("Please provide a test target")
+        return
+    session = rt.InferenceSession(onnx_model, providers=rt.get_available_providers)
+    input_name = session.get_inputs()[0].name
+    prediction_onnx = session.run(None, {input_name: data_target.astype(np.float32)})[0]
+    print(prediction_onnx)
