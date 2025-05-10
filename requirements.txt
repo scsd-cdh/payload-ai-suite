@@ -1,6 +1,6 @@
 keras==3.7.0
 matplotlib==3.5.1
-numpy==1.21.5
+numpy==1.26.4
 oauthlib==3.2.0
 onnx==1.17.0
 onnxruntime==1.20.1
