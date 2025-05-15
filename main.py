@@ -45,10 +45,11 @@ if __name__ == "__main__":
                         help="Specify coordinates for the query in the format: LON LAT")
     parser.add_argument('--time-range', required=False, nargs=2, metavar=('FROM', 'TO'),
                         help="Time range for the query in the format: FROM TO (e.g., '2023-01-01T00:00:00Z 2023-01-03T23:59:59Z')")
+    parser.add_argument('--use-nir', required=False, action='store_true', help="Enable 4-channel RGB-NIR input")
 
     args = parser.parse_args()
     if args.run_model:
-        model.train()
+        model.train(use_nir=args.use_nir)
     elif args.nasa_firms:
         nasa_firms_api()
     elif args.setup_auth:
