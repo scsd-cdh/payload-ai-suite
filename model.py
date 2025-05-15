@@ -23,7 +23,7 @@ from sklearn.model_selection import train_test_split
 import matplotlib.pyplot as plt
 
 
-def train(validate=True, epochs=20, use_nir =True):
+def train(validate=True, epochs=20, use_nir =False):
     """
     Train CNN VGG model on labeled data.
 
