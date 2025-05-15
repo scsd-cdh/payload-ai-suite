@@ -73,10 +73,8 @@ def train(validate=True, epochs=20, use_nir =False):
         include_top=False,
         input_shape=input_shape
     )
+    #since VGG16 is pre-trained w/ 3-channel RGB images, this if-else ensure it runs on a 4-channel system
     
-    '''
-    since VGG16 is pre-trained w/ 3-channel RGB images, this if-else ensure it runs on a 4-channel system
-    '''
 
     # Here we freeze the last 4 layers
     # Layers are set to trainable as True by default
