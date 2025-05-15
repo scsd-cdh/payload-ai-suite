@@ -37,8 +37,8 @@ def train(validate=True, epochs=20, use_nir =False):
     X = []
     y = []
 
-    X, y = preprocess.populate(X, y, "data/labeled/yes", use_nir=True)
-    X, y = preprocess.populate(X, y, "data/labeled/no", use_nir=True , end=True)
+    X, y = preprocess.populate(X, y, "data/labeled/yes", use_nir=use_nir)
+    X, y = preprocess.populate(X, y, "data/labeled/no", use_nir=use_nir , end=True)
 
     # TODO: Use numpy instead here
     X = [X[i] for i in range(min(len(X), len(y)))]
