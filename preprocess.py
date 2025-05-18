@@ -47,7 +47,6 @@ def populate(X_array, y_array, path, use_nir=False, end=False):
             # Ensure y_array has the same length as X_array
             while len(y_array) < len(X_array):
                 y_array.append("N")
-
     except cv2.error as e:
         print(f"CV2 error in preprocess: {e}")
         # Consider re-raising the exception or handling it more robustly
