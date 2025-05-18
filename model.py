@@ -23,7 +23,7 @@ from sklearn.model_selection import train_test_split
 import matplotlib.pyplot as plt
 
 
-def train(validate=True, epochs=20):
+def train(validate=True, epochs=20, use_nir =False):
     """
     Train CNN VGG model on labeled data.
 
@@ -37,8 +37,8 @@ def train(validate=True, epochs=20):
     X = []
     y = []
 
-    X, y = preprocess.populate(X, y, "data/labeled/yes")
-    X, y = preprocess.populate(X, y, "data/labeled/no", end=True)
+    X, y = preprocess.populate(X, y, "data/labeled/yes", use_nir=use_nir)
+    X, y = preprocess.populate(X, y, "data/labeled/no", use_nir=use_nir , end=True)
 
     # TODO: Use numpy instead here
     X = [X[i] for i in range(min(len(X), len(y)))]
@@ -63,8 +63,18 @@ def train(validate=True, epochs=20):
     print("y_train Shape: ", y_train.shape)
     print("y_test Shape: ", y_test.shape)
 
-    img_rows, img_cols = 224, 224
-    vgg = tf.keras.applications.vgg16.VGG16(weights='imagenet', include_top=False, input_shape=(img_rows, img_cols, 3))
+    input_channels = 4 if use_nir else 3
+    input_shape = (224, 224, input_channels)
+
+    weights = 'imagenet' if input_channels == 3 else None
+
+    vgg = tf.keras.applications.vgg16.VGG16(
+        weights=weights,
+        include_top=False,
+        input_shape=input_shape
+    )
+    #since VGG16 is pre-trained w/ 3-channel RGB images, this if-else ensure it runs on a 4-channel system
+    
 
     # Here we freeze the last 4 layers
     # Layers are set to trainable as True by default
