@@ -29,7 +29,7 @@ def populate(X_array, y_array, path, use_nir=False, end=False):
                 print(f"Could not read {image_path}, skipping...")
                 continue
             rgb = cv2.resize(rgb, (224, 224))
-            
+
             if use_nir:
                 # Simulated NIR channel as a grayscale version for now
                 # You should replace this with the real NIR data later
@@ -42,13 +42,15 @@ def populate(X_array, y_array, path, use_nir=False, end=False):
 
             if not end:
                 y_array.append(image_path[0:1])
-        
+
         if end:
-            for _ in range(len(X_array), len(y_array)):
-                y_array.append('N')
-            
+            # Ensure y_array has the same length as X_array
+            while len(y_array) < len(X_array):
+                y_array.append("N")
     except cv2.error as e:
         print(f"CV2 error in preprocess: {e}")
-        return X_array, y_array
-    
+        # Consider re-raising the exception or handling it more robustly
+        # If you return here, you might have inconsistent data
+        raise e  # Re-raise the exception to halt execution
+
     return X_array, y_array
