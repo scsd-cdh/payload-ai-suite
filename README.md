@@ -92,9 +92,8 @@ python3 main.py [OPTIONS]
    python3 main.py --batch-download
    ```
 5. **Run the wildfire classification model with simulated NIR**
-   '''bash
+   ```bash
    python3 main.py --run-model --nir-model
-   '''
 # Resources
 - [Deep Learning in OpenCV](https://github.com/opencv/opencv/wiki/Deep-Learning-in-OpenCV)
 - [VGG Onnx How To](https://github.com/onnx/models/blob/main/validated/vision/classification/vgg/train_vgg.ipynb)
