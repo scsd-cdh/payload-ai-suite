@@ -5,7 +5,7 @@ Collection of software tools for multispectral image analysis and model testing.
 - Cross-reference FIRMS fire event/EoNet and query via Copernicus's process API.
 - Run VGG model on labeled (fire/no fire) data.
 - Preproces RGB-NIR algorithm
-- Optional NIR channel support for RGB-NIR fusion model.
+- Optional NIR channel support for RGB-NIR 4 channel tensor model.
 
 # Mission Goals
 The underlying goal of this project is to illustrate the use of an embedded AI classification model for onboard wildfire detection. The inference provided by the model enables us to discard erroneous images and selectively downlink only successful captures.
