@@ -17,7 +17,7 @@ For effective wildfire detection, we are using a multispectral RGB-NIR camera fr
 
 It has been shown that NIR wavelengths between 830 nm and 1000 nm, captured by COTS camera sensors, provide statistically significant advantages in fire detection. As commonly employed in the field of robotics, our thesis is that the accuracy of our model will increase with an RGB-NIR fusion image as an input to improve feature detection.
 
-If the `--nir-model` flag is used, preprocessing includes an additional NIR channel. Currently, this NIR data is simulated using one of the existing RGB channels as a proxy for NIR. This placeholder can later be replaced with true multispectral NIR data from the camera. 
+If the `--nir-model` flag is used, preprocessing will maintain the additional NIR channel for R&D purposes. Currently, this NIR data can be found in the alpha channel of the test data. In production, the input would be the raw bayer output of the multispectral camera. 
 
 # File Structure
 The project is organized as follows:
