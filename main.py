@@ -2,6 +2,7 @@
 """
 import argparse
 import model
+import mlops
 from fetch import (
     nasa_firms_api,
     setup_auth,
@@ -46,6 +47,7 @@ if __name__ == "__main__":
     parser.add_argument('--time-range', required=False, nargs=2, metavar=('FROM', 'TO'),
                         help="Time range for the query in the format: FROM TO (e.g., '2023-01-01T00:00:00Z 2023-01-03T23:59:59Z')")
     parser.add_argument('--use-nir', required=False, action='store_true', help="Enable 4-channel RGB-NIR input")
+    parser.add_argument('--multimodal-qc', required=False, action='store_true', help="Run multimodal quality control check")
 
     args = parser.parse_args()
     if args.run_model:
@@ -60,5 +62,7 @@ if __name__ == "__main__":
         retrieve_eonet_cross_reference()
     elif args.copernicus_query:
         copernicus_sentiel_query()
+    elif args.multimodal_qc:
+        mlops.run_multimodal_qc()
     else:
         print("No valid arguments provided. Use -h for help.")
