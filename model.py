@@ -23,7 +23,7 @@ from sklearn.model_selection import train_test_split
 import matplotlib.pyplot as plt
 
 
-def train(validate=True, epochs=20, use_nir =False):
+def train(validate=True, epochs=20, use_nir =False, destination_model_dir: Union[str, Path, None] = None):
     """
     Train CNN VGG model on labeled data.
 
@@ -66,7 +66,16 @@ def train(validate=True, epochs=20, use_nir =False):
     input_channels = 4 if use_nir else 3
     input_shape = (224, 224, input_channels)
 
-    weights = 'imagenet' if input_channels == 3 else None
+    #weights = 'imagenet' if input_channels == 3 else None
+    
+    if destination_model_dir:
+        weights = str(destination_model_dir)
+    elif input_channels == 3:
+        #Imagenet-pretrained VGG
+        weights = 'imagenet'
+    else:
+        # 4-channel input
+        weights = None
 
     vgg = tf.keras.applications.vgg16.VGG16(
         weights=weights,
@@ -145,11 +154,17 @@ def export_to_onnx(model):
     )
     onnx.save(onnx_model, 'zetane.onnx')
 
+# not being run, here for testing with the onnx file to put on the hardware which has a program that calls it
+# we need the file onnx first
 def run_inference(onnx_model="zetane.onnx", data_target=None):
-    if not data_target.any():
+    if data_target is None or not data_target.any(): #error fixed 
         print("Please provide a test target")
         return
     session = rt.InferenceSession(onnx_model, providers=rt.get_available_providers)
     input_name = session.get_inputs()[0].name
     prediction_onnx = session.run(None, {input_name: data_target.astype(np.float32)})[0]
     print(prediction_onnx)
+
+#research if we should make a separate file for the cloud model, so that we would 
+# not break the tf model for the wildfire...
+# test whether we can add a separate function where the user can try it out
