@@ -46,6 +46,17 @@ The following environment variables are required for the project to function cor
 - `CLIENT_ID`: Client ID for Copernicus Data Space Ecosystem. Check out https://documentation.dataspace.copernicus.eu/APIs/SentinelHub/Overview/Authentication.html
 - `CLIENT_SECRET`: Client secret for Copernicus Data Space Ecosystem.
 
+## Google Cloud Storage (Optional)
+The project supports Google Cloud Storage for training data and image storage. If you don't have access to GCS:
+
+1. **For Local Development**: The project works fully with local file storage by default. Simply omit the `--use-gcs` flag.
+2. **For Production Access**: Contact the code owner to request service account access for cloud storage.
+
+If you have GCS access, set these additional environment variables:
+- `GCS_BUCKET_NAME`: The storage bucket name (provided by code owner)
+- `GCS_PROJECT_ID`: The GCP project ID (provided by code owner)
+- `GOOGLE_APPLICATION_CREDENTIALS`: Path to your service account JSON key file
+
 # How to Build and Run
 
 ## Prerequisites
