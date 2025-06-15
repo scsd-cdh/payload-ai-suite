@@ -13,16 +13,16 @@ client = genai.Client(api_key=api_key)
 
 class GCSHandler:
     """Handler for Google Cloud Storage operations with streaming support."""
-    
+
     def __init__(self):
         # Use environment variables for configuration
         self.bucket_name = os.getenv('GCS_BUCKET_NAME')
         self.project_id = os.getenv('GCS_PROJECT_ID')
         self.credentials_path = os.getenv('GOOGLE_APPLICATION_CREDENTIALS')
-        
+
         # Set up logging
         self.logger = logging.getLogger(__name__)
-        
+
         # Initialize client with service account
         try:
             if not self.bucket_name:
@@ -31,22 +31,22 @@ class GCSHandler:
                 raise ValueError("GCS_PROJECT_ID environment variable not set")
             if not self.credentials_path:
                 raise ValueError("GOOGLE_APPLICATION_CREDENTIALS environment variable not set")
-                
+
             self.client = storage.Client(project=self.project_id)
             self.bucket = self.client.bucket(self.bucket_name)
             self.logger.info(f"Successfully connected to GCS bucket: {self.bucket_name}")
         except Exception as e:
             self.logger.error(f"Failed to initialize GCS client: {str(e)}")
             raise
-    
+
     def upload_bytes(self, data: bytes, gcs_path: str, content_type: str = None) -> bool:
         """Stream upload bytes data to GCS bucket with logging.
-        
+
         Args:
             data: Bytes data to upload.
             gcs_path: Path in GCS bucket where data will be stored.
             content_type: MIME type of the data (optional).
-            
+
         Returns:
             bool: True if upload successful, False otherwise.
         """
@@ -59,13 +59,13 @@ class GCSHandler:
         except Exception as e:
             self.logger.error(f"Failed to upload bytes to {gcs_path}: {str(e)}")
             return False
-    
+
     def download_as_bytes(self, gcs_path: str) -> Optional[bytes]:
         """Stream download image as bytes.
-        
+
         Args:
             gcs_path: Path in GCS bucket to download from.
-            
+
         Returns:
             Optional[bytes]: Downloaded bytes data or None if failed.
         """
@@ -78,13 +78,13 @@ class GCSHandler:
         except Exception as e:
             self.logger.error(f"Failed to stream {gcs_path}: {str(e)}")
             return None
-        
+
     def list_images(self, prefix: str = '') -> List[str]:
         """List images in bucket with optional prefix.
-        
+
         Args:
             prefix: Path prefix to filter results (optional).
-            
+
         Returns:
             List[str]: List of blob paths matching the prefix.
         """
@@ -101,15 +101,15 @@ class GCSHandler:
 def multimodal_qc(file_input, file_name=None, use_gcs=False, gcs_handler=None):
     """Performs a multimodal quality control check on an image using Gemini.
 
-    This function uploads an image to the Gemini API, asks the model to 
-    determine if there's a fire in the image, and then categorizes the image 
-    as 'fire' or 'no fire' based on the model's response. The processed image 
+    This function uploads an image to the Gemini API, asks the model to
+    determine if there's a fire in the image, and then categorizes the image
+    as 'fire' or 'no fire' based on the model's response. The processed image
     is then saved to a corresponding labeled directory (local or GCS).
 
     Args:
-        file_input: Either a file path (str) for local files or bytes data 
+        file_input: Either a file path (str) for local files or bytes data
             for GCS streaming.
-        file_name: The name of the file being processed (optional for local 
+        file_name: The name of the file being processed (optional for local
             files).
         use_gcs: Whether to use GCS for storage operations.
         gcs_handler: GCS handler instance if use_gcs is True.
@@ -123,9 +123,9 @@ def multimodal_qc(file_input, file_name=None, use_gcs=False, gcs_handler=None):
             file_name = os.path.basename(file_input)
         else:
             raise ValueError("file_name must be provided when file_input is bytes")
-    
+
     print(f"Processing file: {file_name}")
-    
+
     # Upload to Gemini API - handle both file path and bytes
     if isinstance(file_input, str):
         # Local file path
@@ -139,7 +139,7 @@ def multimodal_qc(file_input, file_name=None, use_gcs=False, gcs_handler=None):
             gemini_file = client.files.upload(file=tmp_path)
         finally:
             os.unlink(tmp_path)
-    
+
     response = client.models.generate_content(
         model="gemini-2.5-flash-preview-05-20",
         contents=[gemini_file, "Is there a fire in this image? Respond with 'yes' if there is a fire, or 'no' if there is no fire."],
@@ -156,13 +156,13 @@ def multimodal_qc(file_input, file_name=None, use_gcs=False, gcs_handler=None):
         binary_output = "no fire"
 
     print(f"Binary output for {file_name}: {binary_output}")
-    
+
     # Determine output path
     if binary_output == "fire":
-        output_path = "data/labeled/yes"
+        output_path = "labeled/yes" if use_gcs else "data/labeled/yes"
     else:
-        output_path = "data/labeled/no"
-    
+        output_path = "labeled/no" if use_gcs else "data/labeled/no"
+
     # Save to appropriate location
     if use_gcs and gcs_handler:
         # Save to GCS
@@ -175,7 +175,7 @@ def multimodal_qc(file_input, file_name=None, use_gcs=False, gcs_handler=None):
         else:
             # Bytes already in memory, direct upload
             success = gcs_handler.upload_bytes(file_input, gcs_path, content_type='image/tiff')
-        
+            
         if success:
             print(f"File saved to: gs://{gcs_handler.bucket_name}/{gcs_path}")
         else:
@@ -185,7 +185,7 @@ def multimodal_qc(file_input, file_name=None, use_gcs=False, gcs_handler=None):
         local_output_dir = os.path.join(".", output_path)
         os.makedirs(local_output_dir, exist_ok=True)
         destination_path = os.path.join(local_output_dir, file_name)
-        
+
         if isinstance(file_input, str):
             # Direct file copy for local storage
             shutil.copy(file_input, destination_path)
@@ -193,7 +193,7 @@ def multimodal_qc(file_input, file_name=None, use_gcs=False, gcs_handler=None):
             # Write bytes data to local file
             with open(destination_path, 'wb') as f:
                 f.write(file_input)
-        
+
         print(f"File saved to: {destination_path}")
 
     return binary_output
@@ -201,9 +201,9 @@ def multimodal_qc(file_input, file_name=None, use_gcs=False, gcs_handler=None):
 def run_multimodal_qc(use_gcs=False):
     """Orchestrates the multimodal quality control process for a batch of images.
 
-    This function identifies image files either locally or in GCS and processes 
+    This function identifies image files either locally or in GCS and processes
     each of them using the multimodal_qc function.
-    
+
     Args:
         use_gcs: Whether to use Google Cloud Storage for reading/writing files.
     """
@@ -212,54 +212,54 @@ def run_multimodal_qc(use_gcs=False):
         try:
             gcs_handler = GCSHandler()
             logging.info("Using GCS for multimodal QC")
-            
+
             # List images from GCS
             prefix = "data/eonet_fire_events/to_process/"
             image_files = gcs_handler.list_images(prefix=prefix)
-            
+
             if not image_files:
                 print(f"No images found in GCS at gs://{gcs_handler.bucket_name}/{prefix}")
                 return
-            
+
             print(f"Found {len(image_files)} images in GCS to process")
-            
+
             # Process each image from GCS
             for gcs_path in image_files:
                 # GCS lists directories as paths ending with /
                 if gcs_path.endswith('/'):
                     continue
-                
+
                 # Stream download from GCS
                 image_bytes = gcs_handler.download_as_bytes(gcs_path)
                 if image_bytes is None:
                     print(f"Failed to download {gcs_path}, skipping")
                     continue
-                
+
                 # Extract just the filename from full GCS path
                 file_name = os.path.basename(gcs_path)
-                
+
                 # Run QC on streamed image
                 try:
                     multimodal_qc(image_bytes, file_name, use_gcs=True, gcs_handler=gcs_handler)
                 except Exception as e:
                     logging.error(f"Error processing {file_name}: {str(e)}")
                     continue
-                    
+
         except Exception as e:
             logging.error(f"Failed to initialize GCS handler: {str(e)}")
             print("Falling back to local processing due to GCS error")
             use_gcs = False
-    
+
     if not use_gcs:
         # Standard local file processing
         image_files = glob.glob("data/eonet_fire_events/to_process/*")
-        
+
         if not image_files:
             print("No images found locally in data/eonet_fire_events/to_process/")
             return
-        
+
         print(f"Found {len(image_files)} images locally to process")
-        
+
         # Process each file from local directory
         for file_path in image_files:
             try:
