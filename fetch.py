@@ -18,6 +18,9 @@ from selenium import webdriver
 from selenium.webdriver.common.by import By
 from pyproj import Proj, Transformer
 
+import logging
+logger = logging.getLogger(__name__)
+
 
 def nasa_firms_api():
     """
@@ -144,16 +147,18 @@ def extract_time_ranges_from_eonet(file_path='events/categories.json'):
         print(f"Error extracting time ranges: {e}")
         return []
 
-def write_image(response, metadata, location=None):
-    """Writes image data from an API response to a file.
+def write_image(response, metadata, location=None, use_gcs=False):
+    """Writes image data from an API response to a file or GCS.
 
-    This function extracts image data (e.g., TIFF) from the response object and writes it to a file.
-    The filename is generated based on the metadata provided, such as the output format.
+    This function extracts image data (e.g., TIFF) from the response object and writes it to a file
+    or uploads it to Google Cloud Storage.
 
     Args:
         response (requests.Response): The response object containing the image data.
         metadata (dict): A dictionary containing metadata about the request, such as output format,
                          dimensions, and other relevant information.
+        location: Location object with geohash attribute
+        use_gcs (bool): Whether to upload to GCS instead of saving locally
 
     Returns:
         None
@@ -161,17 +166,48 @@ def write_image(response, metadata, location=None):
     Raises:
         IOError: If there is an error writing the image to a file.
     """
+
+
     try:
         # Extract the output format from metadata (default to TIFF)
         output_format = metadata.get('output', {}).get('format', 'image/png').split('/')[-1]
         # TODO: write custom logic for filename to be populated by metadata satellite type and bands
-        filename = f"./data/eonet_fire_events/{location.geohash}.{output_format}"
-        # filename = f"./data/test.{output_format}"
 
-        # Write the reponse content data to a image file
-        with open(filename, 'wb') as f:
-            f.write(response.content)
-        print(f"Image successfully saved to {filename}")
+        if use_gcs:
+            # Upload to GCS
+            from mlops import GCSHandler
+            from datetime import datetime
+
+            try:
+                gcs = GCSHandler()
+
+                # Create GCS path
+                date_str = datetime.now().strftime('%Y%m%d')
+                gcs_path = f"raw-data/eonet/{date_str}/{location.geohash}.{output_format}"
+
+                # Get content type
+                content_type = metadata.get('output', {}).get('format', 'image/png')
+
+                # Upload bytes directly
+                success = gcs.upload_bytes(response.content, gcs_path, content_type=content_type)
+
+                if success:
+                    logger.info(f"Image successfully uploaded to gs://{gcs.bucket_name}/{gcs_path}")
+                else:
+                    logger.error(f"Failed to upload image to GCS")
+
+            except Exception as e:
+                logger.error(f"GCS upload failed: {str(e)}")
+                # Don't fall back to local save - fail explicitly
+                raise
+        else:
+            # Save locally
+            filename = f"./data/eonet_fire_events/{location.geohash}.{output_format}"
+
+            # Write the response content data to a image file
+            with open(filename, 'wb') as f:
+                f.write(response.content)
+            print(f"Image successfully saved to {filename}")
     except Exception as e:
         print(f"Error writing image: {e}")
 
@@ -255,7 +291,7 @@ def validate_query(target, auth):
     response = requests.post(url, json=data, headers=auth)
     print(response.content)
 
-def copernicus_sentiel_query():
+def copernicus_sentiel_query(use_gcs=False):
     """Queries Sentinel-2 and Sentinel-1 data from the Copernicus Data Space Ecosystem.
 
     This function uses an inline evaluation script to process Sentinel-2 bands of interest
@@ -269,6 +305,9 @@ def copernicus_sentiel_query():
 
     Sentiel-3 bands of interest
 
+    Args:
+        use_gcs (bool): Whether to upload images to GCS instead of saving locally
+
     Returns:
         None
     """
@@ -281,16 +320,7 @@ def copernicus_sentiel_query():
     # Example code how to query copernicus sentiel 2 data and do explcit image processing evals with inline script.
     # Currently reading from the eo_net wildfire json file.
 
-    # TODO incorprate evalscript for fire mask from Sentinel-3 SLSTR L1B for QC purposes
-    # bands F1,F2
-    # Also, check for null data
-
-
-
-
     sensor = "sentinel-2-l2a"
-
-
 
     for location in locations:
 
@@ -343,7 +373,7 @@ def copernicus_sentiel_query():
         response = requests.post(url, json=request, headers=headers)
 
         if response.status_code == 200:
-            write_image(response, metadata=request, location=location)
+            write_image(response, metadata=request, location=location, use_gcs=use_gcs)
 
             print(request)
         else:
@@ -396,4 +426,3 @@ def batch_data_downloader_selenium(url=None, max_pages=9):
         last_height = new_height
     driver.quit()
     return downloaded
-

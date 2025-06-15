@@ -32,3 +32,9 @@ geckodriver
 # IDE-specific files
 .vscode/
 .idea/
+
+# Google Cloud Storage credentials
+.gcs/
+
+# Claude Code configuration
+CLAUDE.md
