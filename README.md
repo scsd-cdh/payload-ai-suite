@@ -17,7 +17,9 @@ For effective wildfire detection, we are using a multispectral RGB-NIR camera fr
 
 It has been shown that NIR wavelengths between 830 nm and 1000 nm, captured by COTS camera sensors, provide statistically significant advantages in fire detection. As commonly employed in the field of robotics, our thesis is that the accuracy of our model will increase with an RGB-NIR fusion image as an input to improve feature detection.
 
-If the `--nir-model` flag is used, preprocessing will maintain the additional NIR channel for R&D purposes. Currently, this NIR data can be found in the alpha channel of the test data. In production, the input would be the raw bayer output of the multispectral camera.
+If the `--use-nir` flag is used, preprocessing will maintain the additional NIR channel for R&D purposes. Currently, this NIR data can be found in the alpha channel of the test data. In production, the input would be the raw bayer output of the multispectral camera.
+
+**Note**: The `--use-nir` flag is not currently supported when using `--use-gcs` due to channel consistency requirements when streaming from Google Cloud Storage.
 
 # MLOps Quality Control
 To ensure the reliability and accuracy of our models in production, the MLOps pipeline incorporates new multimodal quality control (QC) checks. These checks are designed to validate the integrity and consistency of incoming data and model outputs across different modalities, preventing issues such as data drift, sensor anomalies, and model performance degradation. Gemini 2.0 Flash is used under the hood for these checks.
@@ -31,11 +33,16 @@ payload-ai-suite/
 ├── main.py                 # CLI entry point for running tools and workflows.
 ├── model.py                # VGG-based wildfire classification model implementation.
 ├── preprocess.py           # Preprocessing utilities for input data.
+├── mlops.py                # MLOps utilities including GCS integration and multimodal QC.
 ├── events/                 # Directory for storing event-related data.
 │   └── categories.json     # EONET wildfire events data.
 ├── data/                   # Directory for storing downloaded data (e.g., images, multispectral data).
+│   └── labeled/            # Training data directory
+│       ├── yes/            # Positive fire samples
+│       └── no/             # Negative (no-fire) samples
 ├── requirements.txt        # Python dependencies for the project.
 ├── README.md               # Project documentation.
+├── CLAUDE.md               # Instructions for Claude Code AI assistant.
 └── .gitignore              # Git ignore file for excluding unnecessary files.
 ```
 
@@ -83,7 +90,9 @@ python3 main.py [OPTIONS]
 - `--copernicus-query`: Query Sentinel-2 and Sentinel-1 data from Copernicus.
 - `--coordinates MIN_LON MIN_LAT MAX_LON MAX_LAT`: Specify a bounding box for the query.
 - `--time-range FROM TO`: Specify a time range for the query (e.g., `2023-01-01T00:00:00Z 2023-01-03T23:59:59Z`).
-- `--nir-model`: Enable the 4-channel (RGB+NIR) model
+- `--use-nir`: Enable the 4-channel (RGB+NIR) model (Note: Not supported when using `--use-gcs`)
+- `--use-gcs`: Stream training data from Google Cloud Storage
+- `--multimodal-qc`: Run multimodal quality control checks using Gemini 2.0
 
 ### Examples
 1. **Run the wildfire classification model**:
@@ -105,9 +114,15 @@ python3 main.py [OPTIONS]
    ```bash
    python3 main.py --batch-download
    ```
-5. **Run the wildfire classification model with simulated NIR**
+5. **Run the wildfire classification model with simulated NIR**:
    ```bash
-   python3 main.py --run-model --nir-model
+   python3 main.py --run-model --use-nir
+   ```
+
+6. **Run the model using Google Cloud Storage**:
+   ```bash
+   python3 main.py --run-model --use-gcs
+   ```
 # Resources
 - [Deep Learning in OpenCV](https://github.com/opencv/opencv/wiki/Deep-Learning-in-OpenCV)
 - [VGG Onnx How To](https://github.com/onnx/models/blob/main/validated/vision/classification/vgg/train_vgg.ipynb)
