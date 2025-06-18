@@ -295,7 +295,7 @@ def copernicus_sentiel_query(use_gcs=False):
     """Queries Sentinel-2 and Sentinel-1 data from the Copernicus Data Space Ecosystem.
 
     This function uses an inline evaluation script to process Sentinel-2 bands of interest
-    and retrieves data for a specified bounding box and time range.
+    and retrieves data for a specified bounding box and time range. If the option is used, the data is uploaded to GCS. 
 
     Sentiel-2 bands of interest
     B02: Blue
