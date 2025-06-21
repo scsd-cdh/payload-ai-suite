@@ -21,15 +21,21 @@ import onnxruntime as rt
 from sklearn import preprocessing
 from sklearn.model_selection import train_test_split
 import matplotlib.pyplot as plt
+import logging
+from mlops import GCSHandler
 
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
-def train(validate=True, epochs=20, use_nir =False):
+def train(validate=True, epochs=20, use_nir=False, use_gcs=False):
     """
     Train CNN VGG model on labeled data.
 
     Args:
         validate (bool): Whether to validate the model after training.
         epochs (int): Number of epochs to train the model.
+        use_nir (bool): Whether to use NIR channel.
+        use_gcs (bool): Whether to stream data from GCS.
 
     Returns:
         None
@@ -37,8 +43,23 @@ def train(validate=True, epochs=20, use_nir =False):
     X = []
     y = []
 
-    X, y = preprocess.populate(X, y, "data/labeled/yes", use_nir=use_nir)
-    X, y = preprocess.populate(X, y, "data/labeled/no", use_nir=use_nir , end=True)
+    if use_gcs:
+        # Stream images from GCS
+        try:
+            gcs = GCSHandler()
+
+            # Pass GCS handler to populate function to stream from bucket
+            # The populate function will use gcs.list_images() and gcs.download_as_bytes()
+            X, y = preprocess.populate(X, y, "labeled/yes", use_nir=use_nir, gcs_handler=gcs)
+            X, y = preprocess.populate(X, y, "labeled/no", use_nir=use_nir, end=True, gcs_handler=gcs)
+
+        except Exception as e:
+            logger.error(f"Failed to load data from GCS: {str(e)}")
+            raise
+    else:
+        # Use local files
+        X, y = preprocess.populate(X, y, "data/labeled/yes", use_nir=use_nir)
+        X, y = preprocess.populate(X, y, "data/labeled/no", use_nir=use_nir, end=True)
 
     # TODO: Use numpy instead here
     X = [X[i] for i in range(min(len(X), len(y)))]
@@ -74,7 +95,6 @@ def train(validate=True, epochs=20, use_nir =False):
         input_shape=input_shape
     )
     #since VGG16 is pre-trained w/ 3-channel RGB images, this if-else ensure it runs on a 4-channel system
-    
 
     # Here we freeze the last 4 layers
     # Layers are set to trainable as True by default
