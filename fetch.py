@@ -7,6 +7,8 @@ import requests
 import json
 import time
 import os
+from mlops import GCSHandler
+from datetime import datetime
 
 
 from oauthlib.oauth2 import BackendApplicationClient
@@ -20,6 +22,84 @@ from pyproj import Proj, Transformer
 
 import logging
 logger = logging.getLogger(__name__)
+
+
+class ProgressTracker:
+    """Tracks progress of EONET data scraping at event and location level."""
+
+    # Legacy workflow starts at event 125
+    LEGACY_START_INDEX = 125
+
+    def __init__(self, filepath='progress_counter/eonet.json'):
+        self.filepath = filepath
+        self.progress = self._load_progress()
+
+    def _load_progress(self):
+        """Load existing progress from file or create new."""
+        if os.path.exists(self.filepath):
+            try:
+                with open(self.filepath, 'r') as f:
+                    return json.load(f)
+            except Exception as e:
+                logger.warning(f"Could not load progress file: {e}. Starting fresh.")
+
+        # Default structure - start at legacy index
+        return {
+            "current_event_index": self.LEGACY_START_INDEX,
+            "events": {}
+        }
+
+    def save_progress(self):
+        """Save current progress to file."""
+        os.makedirs(os.path.dirname(self.filepath), exist_ok=True)
+        with open(self.filepath, 'w') as f:
+            json.dump(self.progress, f, indent=2)
+
+    def get_event_progress(self, event_id):
+        """Get progress for a specific event."""
+        return self.progress["events"].get(event_id, {
+            "locations_generated": 0,
+            "locations_processed": 0,
+            "location_status": {}
+        })
+
+    def update_event_progress(self, event_id, locations_generated=None, location_index=None, status=None):
+        """Update progress for an event and/or specific location."""
+        if event_id not in self.progress["events"]:
+            self.progress["events"][event_id] = {
+                "locations_generated": 0,
+                "locations_processed": 0,
+                "location_status": {}
+            }
+
+        event = self.progress["events"][event_id]
+
+        if locations_generated is not None:
+            event["locations_generated"] = locations_generated
+
+        if location_index is not None and status is not None:
+            event["location_status"][str(location_index)] = status
+            # Update processed count
+            event["locations_processed"] = sum(
+                1 for s in event["location_status"].values()
+                if s == "completed"
+            )
+
+        self.save_progress()
+
+    def should_skip_location(self, event_id, location_index):
+        """Check if a location has already been processed."""
+        event = self.get_event_progress(event_id)
+        return event["location_status"].get(str(location_index)) == "completed"
+
+    def get_resume_point(self):
+        """Get the event index to resume from."""
+        return self.progress.get("current_event_index", 0)
+
+    def update_current_event_index(self, index):
+        """Update the current event index being processed."""
+        self.progress["current_event_index"] = index
+        self.save_progress()
 
 
 def nasa_firms_api():
@@ -170,20 +250,18 @@ def write_image(response, metadata, location=None, use_gcs=False):
 
     try:
         # Extract the output format from metadata (default to TIFF)
-        output_format = metadata.get('output', {}).get('format', 'image/png').split('/')[-1]
+        output_format = metadata.get('output', {}).get('format', 'image/tiff').split('/')[-1]
         # TODO: write custom logic for filename to be populated by metadata satellite type and bands
 
         if use_gcs:
             # Upload to GCS
-            from mlops import GCSHandler
-            from datetime import datetime
 
             try:
                 gcs = GCSHandler()
 
                 # Create GCS path
                 date_str = datetime.now().strftime('%Y%m%d')
-                gcs_path = f"raw-data/eonet/{date_str}/{location.geohash}.{output_format}"
+                gcs_path = f"raw_data/eonet/to_process/{date_str}/{location.geohash}.{output_format}"
 
                 # Get content type
                 content_type = metadata.get('output', {}).get('format', 'image/png')
@@ -248,15 +326,16 @@ class Location:
         geohash = pgh.encode(latitude=coordinates[0], longitude=coordinates[1])
         return geohash
 
-def create_locations(amount=125):
+def create_locations(amount=135, progress_tracker=None):
     """Creates a list of Location objects based on EONET data.
 
     This function extracts time ranges and coordinates from the EONET wildfire data
-    and uses them to create Location objects. The number of locations created is
-    determined by the `amount` parameter.
+    and uses them to create Location objects, starting from the last processed entry
+    if a progress tracker is provided.
 
     Args:
-        amount (int): The number of Location objects to create. Defaults to 5.
+        amount (int): The number of Location objects to process from the starting point. Defaults to 135.
+        progress_tracker (ProgressTracker): Optional progress tracker instance.
 
     Returns:
         list: A list of Location objects.
@@ -265,12 +344,34 @@ def create_locations(amount=125):
     locations = []
     time_ranges = extract_time_ranges_from_eonet()
     coordinates = extract_eonet_coordinates()
-    # amount is a pre-determined parameter. the current value is arbitrary at this point
-    for entry in range(amount):
-        if entry < 100:
-            continue
+
+    # Get resume point if using progress tracker
+    start_entry = 0
+    if progress_tracker:
+        start_entry = progress_tracker.get_resume_point()
+        print(f"Resuming from entry {start_entry}")
+    
+    print(f"Creating locations from {start_entry} to {start_entry + amount}")
+    
+    # Process 'amount' number of locations starting from start_entry
+    for entry in range(start_entry, start_entry + amount):
         location = Location(coordinates[0][entry], time=time_ranges[entry])
+        location.entry_index = entry
+
+        # Skip if already processed (using geohash as unique ID)
+        if progress_tracker and progress_tracker.should_skip_location(location.geohash, 0):
+            print(f"Skipping already processed location: {location.geohash}")
+            # Still update the current index even when skipping
+            if progress_tracker:
+                progress_tracker.update_current_event_index(entry + 1)
+            continue
+
         locations.append(location)
+
+        # Update progress tracker - set to next entry to process
+        if progress_tracker:
+            progress_tracker.update_current_event_index(entry + 1)
+
     return locations
 
 def validate_query(target, auth):
@@ -291,11 +392,11 @@ def validate_query(target, auth):
     response = requests.post(url, json=data, headers=auth)
     print(response.content)
 
-def copernicus_sentiel_query(use_gcs=False):
+def copernicus_sentiel_query(use_gcs=False, amount=135):
     """Queries Sentinel-2 and Sentinel-1 data from the Copernicus Data Space Ecosystem.
 
     This function uses an inline evaluation script to process Sentinel-2 bands of interest
-    and retrieves data for a specified bounding box and time range. If the option is used, the data is uploaded to GCS. 
+    and retrieves data for a specified bounding box and time range. If the option is used, the data is uploaded to GCS.
 
     Sentiel-2 bands of interest
     B02: Blue
@@ -307,6 +408,7 @@ def copernicus_sentiel_query(use_gcs=False):
 
     Args:
         use_gcs (bool): Whether to upload images to GCS instead of saving locally
+        amount (int): Total number of locations to process (default 135)
 
     Returns:
         None
@@ -315,69 +417,82 @@ def copernicus_sentiel_query(use_gcs=False):
     ACCESS_TOKEN = setup_auth()
     headers={f"Authorization" : f"Bearer {ACCESS_TOKEN}"}
 
-    locations = create_locations()
+    # Initialize progress tracker
+    progress_tracker = ProgressTracker()
 
+    locations = create_locations(amount=amount, progress_tracker=progress_tracker)
+
+    print(f"Will process {len(locations)} unprocessed locations")
+    
     # Example code how to query copernicus sentiel 2 data and do explcit image processing evals with inline script.
     # Currently reading from the eo_net wildfire json file.
 
     sensor = "sentinel-2-l2a"
 
     for location in locations:
+        # Update progress for this specific location
+        try:
+            evalscript = """
+            //VERSION=3
+            function setup() {
+            return {
+                    input: [ "B08", "B04", "B03", "B02"],
+                    output: {
+                    bands: 4
+                    },
 
-        evalscript = """
-        //VERSION=3
-        function setup() {
-        return {
-                input: [ "B08", "B04", "B03", "B02"],
-                output: {
-                bands: 4
+                };
+            }
+
+            function evaluatePixel(sample) {
+            return [2.5 * sample.B08, 2.5 * sample.B04, 2.5 * sample.B03, 2.5 * sample.B02];
+            }
+            """
+
+
+            request = {
+                "input": {
+                    "bounds": {
+                        # "properties": {"crs": "http://www.opengis.net/def/crs/EPSG/0/32633"},
+                        # "bbox": [13, 45, 14, 46],
+                        "bbox": location.bbox['bbox']
+
+                    },
+                    "data": [
+                        {
+                            "type": sensor,
+                            "dataFilter": {
+                                "timeRange": {
+                                    "from": location.time["from"],
+                                    "to": location.time["to"],
+                                }
+                            },
+                        }
+                    ],
                 },
-
-            };
-        }
-
-        function evaluatePixel(sample) {
-        return [2.5 * sample.B08, 2.5 * sample.B04, 2.5 * sample.B03, 2.5 * sample.B02];
-        }
-        """
-
-
-        request = {
-            "input": {
-                "bounds": {
-                    # "properties": {"crs": "http://www.opengis.net/def/crs/EPSG/0/32633"},
-                    # "bbox": [13, 45, 14, 46],
-                    "bbox": location.bbox['bbox']
-
+                "output": {
+                    "width": 512,
+                    "height": 512,
+                    "format": "image/tiff"
                 },
-                "data": [
-                    {
-                        "type": sensor,
-                        "dataFilter": {
-                            "timeRange": {
-                                "from": location.time["from"],
-                                "to": location.time["to"],
-                            }
-                        },
-                    }
-                ],
-            },
-            "output": {
-                "width": 512,
-                "height": 512,
-                "format": "image/png"
-            },
-            "evalscript": evalscript,
-        }
-        url = "https://sh.dataspace.copernicus.eu/api/v1/process"
-        response = requests.post(url, json=request, headers=headers)
+                "evalscript": evalscript,
+            }
+            url = "https://sh.dataspace.copernicus.eu/api/v1/process"
+            response = requests.post(url, json=request, headers=headers)
 
-        if response.status_code == 200:
-            write_image(response, metadata=request, location=location, use_gcs=use_gcs)
-
-            print(request)
-        else:
-            print(f"{response.status_code}: error in request, outputting content for debugging {response.content}")
+            if response.status_code == 200:
+                write_image(response, metadata=request, location=location, use_gcs=use_gcs)
+                # Mark location as completed
+                progress_tracker.update_event_progress(location.geohash, location_index=0, status="completed")
+                print(f"Completed location {location.geohash}")
+            else:
+                # Mark location as failed
+                progress_tracker.update_event_progress(location.geohash, location_index=0, status="failed")
+                print(f"{response.status_code}: error in request for {location.geohash}, outputting content for debugging {response.content}")
+        except Exception as e:
+            # Mark location as failed on any exception
+            progress_tracker.update_event_progress(location.geohash, location_index=0, status="failed")
+            print(f"Exception processing location {location.geohash}: {e}")
 
 def batch_data_downloader_selenium(url=None, max_pages=9):
     """Downloads images from a Flickr album using Selenium.

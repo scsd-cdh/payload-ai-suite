@@ -3,6 +3,7 @@ import shutil
 import glob
 import logging
 import tempfile
+import time
 from typing import List, Optional
 
 from google import genai
@@ -140,11 +141,29 @@ def multimodal_qc(file_input, file_name=None, use_gcs=False, gcs_handler=None):
         finally:
             os.unlink(tmp_path)
 
-    response = client.models.generate_content(
-        model="gemini-2.5-flash-preview-05-20",
-        contents=[gemini_file, "Is there a fire in this image? Respond with 'yes' if there is a fire, or 'no' if there is no fire."],
-    )
-    raw_response_text = response.text.strip().lower()
+    # Implement exponential backoff for API calls
+    max_retries = 5
+    base_delay = 60  # Start with 1 minute
+    
+    for attempt in range(max_retries):
+        try:
+            response = client.models.generate_content(
+                model="gemini-2.0-flash-exp",
+                contents=[gemini_file, "Is there a fire in this image? Respond with 'yes' if there is a fire, or 'no' if there is no fire."],
+            )
+            raw_response_text = response.text.strip().lower()
+            break  # Success, exit retry loop
+        except Exception as e:
+            if attempt == max_retries - 1:
+                # Last attempt failed, re-raise the exception
+                raise
+            
+            # Calculate delay with exponential backoff: 1min, 2min, 4min, 8min
+            delay = base_delay * (2 ** attempt)
+            delay_minutes = delay / 60
+            print(f"API request failed (attempt {attempt + 1}/{max_retries}): {str(e)}")
+            print(f"Retrying in {delay_minutes:.1f} minutes...")
+            time.sleep(delay)
     print(f"Raw response for {file_name}: {raw_response_text}")
 
     if "yes" in raw_response_text and "no" not in raw_response_text:
@@ -175,7 +194,7 @@ def multimodal_qc(file_input, file_name=None, use_gcs=False, gcs_handler=None):
         else:
             # Bytes already in memory, direct upload
             success = gcs_handler.upload_bytes(file_input, gcs_path, content_type='image/tiff')
-            
+
         if success:
             print(f"File saved to: gs://{gcs_handler.bucket_name}/{gcs_path}")
         else:
@@ -214,7 +233,7 @@ def run_multimodal_qc(use_gcs=False):
             logging.info("Using GCS for multimodal QC")
 
             # List images from GCS
-            prefix = "data/eonet_fire_events/to_process/"
+            prefix = "raw_data/eonet/to_process/"
             image_files = gcs_handler.list_images(prefix=prefix)
 
             if not image_files:
