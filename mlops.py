@@ -143,7 +143,7 @@ def multimodal_qc(file_input, file_name=None, use_gcs=False, gcs_handler=None):
 
     # Implement exponential backoff for API calls
     max_retries = 5
-    base_delay = 10  # Start with 10 seconds
+    base_delay = 60  # Start with 1 minute
     
     for attempt in range(max_retries):
         try:
@@ -158,10 +158,11 @@ def multimodal_qc(file_input, file_name=None, use_gcs=False, gcs_handler=None):
                 # Last attempt failed, re-raise the exception
                 raise
             
-            # Calculate delay with exponential backoff: 10s, 20s, 40s, 80s
+            # Calculate delay with exponential backoff: 1min, 2min, 4min, 8min
             delay = base_delay * (2 ** attempt)
+            delay_minutes = delay / 60
             print(f"API request failed (attempt {attempt + 1}/{max_retries}): {str(e)}")
-            print(f"Retrying in {delay} seconds...")
+            print(f"Retrying in {delay_minutes:.1f} minutes...")
             time.sleep(delay)
     print(f"Raw response for {file_name}: {raw_response_text}")
 
