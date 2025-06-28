@@ -11,6 +11,7 @@ TODO:
 
 """
 
+import os
 import tensorflow as tf
 import keras
 import preprocess
@@ -27,7 +28,7 @@ from mlops import GCSHandler
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-def train(validate=True, epochs=20, use_nir=False, use_gcs=False):
+def train(validate=False, epochs=12, use_nir=False, use_gcs=False):
     """
     Train CNN VGG model on labeled data.
 
@@ -119,16 +120,33 @@ def train(validate=True, epochs=20, use_nir=False, use_gcs=False):
 
     print(model.summary())
     model.compile(optimizer='adam', loss='categorical_crossentropy', metrics=['accuracy'])
+
+    checkpoint_path = "training_checkpoints/cp.weights.h5"
+    checkpoint_dir = os.path.dirname(checkpoint_path)
+
+    latest = tf.train.latest_checkpoint(checkpoint_dir)
+    if latest:
+        model.load_weights(latest)
+        print("Loaded weights from checkpoint.")
+
+    # Create a callback that saves the model's weights
+    cp_callback = tf.keras.callbacks.ModelCheckpoint(filepath=checkpoint_path,
+                                                     save_weights_only=True,
+                                                     verbose=1)
+
     history = model.fit(X_train, y_train,
                         epochs=epochs,
                         validation_data=(X_test, y_test),
                         verbose=1,
-                        initial_epoch=0)
+                        initial_epoch=0,
+                        shuffle=True,
+                        callbacks=[cp_callback])
 
     accuracy = history.history['accuracy']
     val_accuracy = history.history['val_accuracy']
     loss = history.history['loss']
     val_loss = history.history['val_loss']
+    export_to_onnx(model)
 
     if validate:
         test_loss, test_accuracy = model.evaluate(X_test, y_test)
