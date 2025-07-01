@@ -105,4 +105,53 @@ def stream_image_from_gcs(image_bytes: bytes) -> Optional[np.ndarray]:
         return img
     except Exception as e:
         logger.error(f"Failed to decode image: {str(e)}")
-        return None
+        return 
+        
+
+# sassan ghazi - 2025/07/01
+# issue: z-score preprocess for zetane
+
+def dyn_zscore_normalize(img: ndarray, no_data_value: float = 0.0) -> npdarray:
+    '''
+    mimic the behaviour in omnicloudmask(pytorch) using the numpy/openCV for image arrays 
+
+    Requirements:
+    -  per channel z-score normalization 
+    -  exclude no-data pixels from mean & standard deviation calculation (value: 0.0)
+    -  set no-data pixels to 0 after normalization 
+    -  function should work for both 3- and 4-channel images
+
+    '''
+
+    img = img.astype(np.float32) # 32-bit float for images
+    normal_img = np.zeros_like(img) # storing normalized values with an empty output image 
+
+    for c in range(img.shape[2]):
+        channel = img[:,:, c] # by iterating through every channel in the images
+        mask = channel != no_data_value # ignoring 0-values.... pixels are valid if they are not equal to the no_data_value
+
+        if np.any(mask):
+            valid_pxl = channel[mask] # non-zero pixels for the channel
+
+            mean = valid_pxl.mean() # computation for the mean
+            standard_dev = valid_pxl.std() # computation for the standard deviation
+
+            std = std if std > 1e-8 else 1e-8 # checking for error by division of 0
+            # set the number to a smaller number if too close to 0
+
+            normal_channel = (channel - mean) / standard_dev # applying normalization to z-score  
+            #TODO: all pixels here will be normalized. will look into this later on
+            normal_channel[~mask] = 0.0 # 0.0 is assigned to pixels that were identified as 0
+
+            normal_img[:,:,c] = normal_channel
+
+        else:
+            normal_img[:,:,c] = 0.0 # filled with 0s for no-data
+
+        return normal_img # should return image with the same shape that was given by the input
+
+
+
+
+
+
