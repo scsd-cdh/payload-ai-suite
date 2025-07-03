@@ -48,12 +48,12 @@ def populate(X_array, y_array, path, use_nir=False, end=False, gcs_handler=None)
                     nir = np.expand_dims(nir, axis=-1)
                     # Shape (224, 224, 4)
                     rgb_nir = np.concatenate((rgb, nir), axis=-1)
-                    rgb_nir = dyn_zscore_normalize(rgb_nir) # normalization 
-                    print("normalized rgb-nir":, rgb_nir.mean(), rgb_nir.std())
+                    rgb_nir = dyn_zscore_normalize(rgb_nir) # normalization
+                   # print("normalized rgb-nir":, rgb_nir.mean(), rgb_nir.std())
                     X_array.append(rgb_nir)
                 else:
                     rgb = dyn_zscore_normalize(rgb) # normalization
-                    print("normalized rgb:", rgb.mean(), rgb_nir.std())
+                    #print("normalized rgb:", rgb.mean(), rgb_nir.std())
                     X_array.append(rgb)
 
                 if not end:
@@ -109,26 +109,26 @@ def stream_image_from_gcs(image_bytes: bytes) -> Optional[np.ndarray]:
         return img
     except Exception as e:
         logger.error(f"Failed to decode image: {str(e)}")
-        return 
-        
+        return
+
 
 # sassan ghazi - 2025/07/01
 # issue: z-score preprocess for zetane
 
-def dyn_zscore_normalize(img: ndarray, no_data_value: float = 0.0) -> npdarray:
+def dyn_zscore_normalize(img: np.ndarray, no_data_value: float = 0.0) -> np.ndarray:
     '''
-    mimic the behaviour in omnicloudmask(pytorch) using the numpy/openCV for image arrays 
+    mimic the behaviour in omnicloudmask(pytorch) using the numpy/openCV for image arrays
 
     Requirements:
-    -  per channel z-score normalization 
+    -  per channel z-score normalization
     -  exclude no-data pixels from mean & standard deviation calculation (value: 0.0)
-    -  set no-data pixels to 0 after normalization 
+    -  set no-data pixels to 0 after normalization
     -  function should work for both 3- and 4-channel images
 
     '''
 
     img = img.astype(np.float32) # 32-bit float for images
-    normal_img = np.zeros_like(img) # storing normalized values with an empty output image 
+    normal_img = np.zeros_like(img) # storing normalized values with an empty output image
 
     for c in range(img.shape[2]):
         channel = img[:,:, c] # by iterating through every channel in the images
@@ -140,10 +140,10 @@ def dyn_zscore_normalize(img: ndarray, no_data_value: float = 0.0) -> npdarray:
             mean = valid_pxl.mean() # computation for the mean
             standard_dev = valid_pxl.std() # computation for the standard deviation
 
-            std = std if std > 1e-8 else 1e-8 # checking for error by division of 0
+            std = standard_dev if standard_dev > 1e-8 else 1e-8 # checking for error by division of 0
             # set the number to a smaller number if too close to 0
 
-            normal_channel = (channel - mean) / standard_dev # applying normalization to z-score  
+            normal_channel = (channel - mean) / standard_dev # applying normalization to z-score
             #TODO: all pixels here will be normalized. will look into this later on
             normal_channel[~mask] = 0.0 # 0.0 is assigned to pixels that were identified as 0
 
@@ -153,9 +153,3 @@ def dyn_zscore_normalize(img: ndarray, no_data_value: float = 0.0) -> npdarray:
             normal_img[:,:,c] = 0.0 # filled with 0s for no-data
 
         return normal_img # should return image with the same shape that was given by the input
-
-
-
-
-
-
