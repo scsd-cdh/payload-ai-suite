@@ -126,6 +126,7 @@ def dyn_zscore_normalize(img: np.ndarray, no_data_value: float = 0.0) -> np.ndar
     -  function should work for both 3- and 4-channel images
 
     '''
+    logger.debug(f"Starting z-score normalization - Input shape: {img.shape}, dtype: {img.dtype}")
 
     img = img.astype(np.float32) # 32-bit float for images
     normal_img = np.zeros_like(img) # storing normalized values with an empty output image
@@ -133,23 +134,37 @@ def dyn_zscore_normalize(img: np.ndarray, no_data_value: float = 0.0) -> np.ndar
     for c in range(img.shape[2]):
         channel = img[:,:, c] # by iterating through every channel in the images
         mask = channel != no_data_value # ignoring 0-values.... pixels are valid if they are not equal to the no_data_value
+        
+        valid_pixel_count = np.sum(mask)
+        logger.debug(f"Channel {c}: Found {valid_pixel_count} valid pixels out of {channel.size} total")
 
         if np.any(mask):
             valid_pxl = channel[mask] # non-zero pixels for the channel
 
             mean = valid_pxl.mean() # computation for the mean
             standard_dev = valid_pxl.std() # computation for the standard deviation
+            
+            logger.debug(f"Channel {c}: Mean={mean:.4f}, Std={standard_dev:.4f}")
 
-            std = standard_dev if standard_dev > 1e-8 else 1e-8 # checking for error by division of 0
+            standard_dev = standard_dev if standard_dev > 1e-8 else 1e-8 # checking for error by division of 0
             # set the number to a smaller number if too close to 0
+            
+            if standard_dev < 1e-8:
+                logger.warning(f"Channel {c}: Very low standard deviation ({standard_dev}), using 1e-8 to avoid division by zero")
 
             normal_channel = (channel - mean) / standard_dev # applying normalization to z-score
             #TODO: all pixels here will be normalized. will look into this later on
             normal_channel[~mask] = 0.0 # 0.0 is assigned to pixels that were identified as 0
 
             normal_img[:,:,c] = normal_channel
+            
+            # Log statistics of normalized channel
+            normalized_valid = normal_channel[mask]
+            logger.debug(f"Channel {c} after normalization: Mean={normalized_valid.mean():.4f}, Std={normalized_valid.std():.4f}")
 
         else:
             normal_img[:,:,c] = 0.0 # filled with 0s for no-data
+            logger.warning(f"Channel {c}: No valid pixels found, filling with zeros")
 
-        return normal_img # should return image with the same shape that was given by the input
+    logger.debug(f"Z-score normalization complete - Output shape: {normal_img.shape}")
+    return normal_img # should return image with the same shape that was given by the input
