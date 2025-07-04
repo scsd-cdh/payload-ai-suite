@@ -9,6 +9,7 @@ from fetch import (
     batch_data_downloader_selenium,
     retrieve_eonet_cross_reference,
     copernicus_sentiel_query,
+    convert_sen2fire_labeled
 )
 
 if __name__ == "__main__":
@@ -49,6 +50,7 @@ if __name__ == "__main__":
     parser.add_argument('--use-nir', required=False, action='store_true', help="Enable 4-channel RGB-NIR input")
     parser.add_argument('--multimodal-qc', required=False, action='store_true', help="Run multimodal quality control check")
     parser.add_argument('--use-gcs', required=False, action='store_true', help="Stream training data from Google Cloud Storage")
+    parser.add_argument('--process-sen2fire', required=False, action='store_true', help="Convert Sen2Fire dataset instead of labeled/yes and no.") 
 
     args = parser.parse_args()
     if args.run_model:
@@ -65,5 +67,7 @@ if __name__ == "__main__":
         copernicus_sentiel_query(use_gcs=args.use_gcs)
     elif args.multimodal_qc:
         mlops.run_multimodal_qc(use_gcs=args.use_gcs)
+    elif args.process_sen2fire:
+        fetch.convert_sen2fire_to_labeled(root_dir="data/sen2fire", output_dir="data/labeled", use_nir=args.use_nir)
     else:
         print("No valid arguments provided. Use -h for help.")
