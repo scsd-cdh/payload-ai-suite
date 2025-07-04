@@ -146,7 +146,7 @@ def train(validate=False, epochs=12, use_nir=False, use_gcs=False):
     val_accuracy = history.history['val_accuracy']
     loss = history.history['loss']
     val_loss = history.history['val_loss']
-    export_to_onnx(model)
+    # export_to_onnx(model)
 
     if validate:
         test_loss, test_accuracy = model.evaluate(X_test, y_test)
