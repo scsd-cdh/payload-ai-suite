@@ -16,7 +16,10 @@ from google.cloud import storage
 # load_dotenv() 
 
 api_key = os.getenv("GEMINI_API_KEY")
-client = genai.Client(api_key=api_key)
+try:
+    client = genai.Client(api_key=api_key)
+except Exception as e:
+    print(f"{e}: no google api key found in environment")
 
 class GCSHandler:
     """Handler for Google Cloud Storage operations with streaming support."""
@@ -150,7 +153,7 @@ def multimodal_qc(file_input, file_name=None, use_gcs=False, gcs_handler=None):
     # Implement exponential backoff for API calls
     max_retries = 5
     base_delay = 60  # Start with 1 minute
-    
+
     for attempt in range(max_retries):
         try:
             response = client.models.generate_content(
@@ -163,7 +166,7 @@ def multimodal_qc(file_input, file_name=None, use_gcs=False, gcs_handler=None):
             if attempt == max_retries - 1:
                 # Last attempt failed, re-raise the exception
                 raise
-            
+
             # Calculate delay with exponential backoff: 1min, 2min, 4min, 8min
             delay = base_delay * (2 ** attempt)
             delay_minutes = delay / 60
