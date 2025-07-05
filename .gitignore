@@ -43,6 +43,12 @@ CLAUDE.md
 # Python version
 .python-version
 
-# .toml and .lock files
+# .toml and .lock files from uv 
 pyproject.toml
 uv.lock
+
+# training checkpoints
+training_checkpoints
+
+#  onnx files
+*.onnx
