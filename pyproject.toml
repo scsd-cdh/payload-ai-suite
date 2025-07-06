@@ -4,7 +4,6 @@ version = "0.1.0"
 description = "Add your description here"
 requires-python = ">=3.10"
 dependencies = [
-    "dotenv>=0.9.9",
     "google-cloud-storage==2.18.2",
     "google-genai>=1.24.0",
     "keras==3.7.0",
