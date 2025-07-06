@@ -3,6 +3,7 @@
 import argparse
 import model
 import mlops
+import cloud
 from fetch import (
     nasa_firms_api,
     setup_auth,
@@ -28,6 +29,7 @@ if __name__ == "__main__":
         --coordinates: Specify coordinates for the query in the format: LON LAT.
         --time-range: Time range for the query in the format: FROM TO
                       (e.g., '2023-01-01T00:00:00Z 2023-01-03T23:59:59Z').
+        --cloud-mask: Export OmniCloudMask models to ONNX and test on labeled data.
 
     Raises:
         SystemExit: If invalid arguments are provided.
@@ -49,6 +51,7 @@ if __name__ == "__main__":
     parser.add_argument('--use-nir', required=False, action='store_true', help="Enable 4-channel RGB-NIR input")
     parser.add_argument('--multimodal-qc', required=False, action='store_true', help="Run multimodal quality control check")
     parser.add_argument('--use-gcs', required=False, action='store_true', help="Stream training data from Google Cloud Storage")
+    parser.add_argument('--cloud-mask', required=False, action='store_true', help="Export OmniCloudMask models to ONNX and test on labeled data")
 
     args = parser.parse_args()
     if args.run_model:
@@ -65,5 +68,7 @@ if __name__ == "__main__":
         copernicus_sentiel_query(use_gcs=args.use_gcs)
     elif args.multimodal_qc:
         mlops.run_multimodal_qc(use_gcs=args.use_gcs)
+    elif args.cloud_mask:
+        cloud.main()
     else:
         print("No valid arguments provided. Use -h for help.")

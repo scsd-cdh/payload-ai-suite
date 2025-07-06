@@ -6,11 +6,15 @@ Collection of software tools for multispectral image analysis and model testing.
 - Run VGG model on labeled (fire/no fire) data.
 - Preproces RGB-NIR algorithm
 - Optional NIR channel support for RGB-NIR 4 channel tensor model.
+- Cloud mask preprocessing to check cloud coverage threshold before wildfire inference.
 
 # Mission Goals
 The underlying goal of this project is to illustrate the use of an embedded AI classification model for onboard wildfire detection. The inference provided by the model enables us to discard erroneous images and selectively downlink only successful captures.
 
 Our operational goal is to detect medium fires (10-1,000 acres). These events represent a critical transition phase where intervention is still effective, but urgency is high. This targeted monitoring fills the gap between in-situ ground methods and “big players” like MODIS and VIIRS. Given our quality control calculations, medium fire targets are well within our system's capabilities. By reducing false positives, we aim to increase stakeholder confidence in alerts.
+
+# System Workflow
+![Payload AI Suite Workflow](assets/workflow_diagram.png)
 
 # Preprocess Methodology
 For effective wildfire detection, we are using a multispectral RGB-NIR camera from Spectral Devices. This choice is based on the fact that the visible light spectrum (i.e., RGB) shares the same limitations as the human visual system when directly detecting fires. Incidental smoke severely limits the visual contrast of active flames, and fire emits far more energy in the IR spectrum.
@@ -24,6 +28,15 @@ If the `--use-nir` flag is used, preprocessing will maintain the additional NIR 
 # MLOps Quality Control
 To ensure the reliability and accuracy of our models in production, the MLOps pipeline incorporates new multimodal quality control (QC) checks. These checks are designed to validate the integrity and consistency of incoming data and model outputs across different modalities, preventing issues such as data drift, sensor anomalies, and model performance degradation. Gemini 2.0 Flash is used under the hood for these checks.
 
+# Cloud Mask Preprocessing
+The cloud mask functionality serves as a critical preprocessing step to assess cloud coverage before wildfire detection inference. Using OmniCloudMask models, the system:
+- Classifies each pixel as Clear, Thin Cloud, Thick Cloud, or Cloud Shadow
+- Calculates total cloud coverage percentage to determine image suitability
+- Filters out heavily clouded images that would compromise wildfire detection accuracy
+- Ensures only clear or minimally clouded images proceed to the wildfire CNN
+
+This preprocessing step significantly improves the reliability of wildfire detection by preventing false negatives caused by cloud occlusion.
+
 # File Structure
 The project is organized as follows:
 
@@ -34,6 +47,7 @@ payload-ai-suite/
 ├── model.py                # VGG-based wildfire classification model implementation.
 ├── preprocess.py           # Preprocessing utilities for input data.
 ├── mlops.py                # MLOps utilities including GCS integration and multimodal QC.
+├── cloud.py                # Cloud mask detection preprocessing for cloud coverage assessment.
 ├── events/                 # Directory for storing event-related data.
 │   └── categories.json     # EONET wildfire events data.
 ├── data/                   # Directory for storing downloaded data (e.g., images, multispectral data).
@@ -93,6 +107,7 @@ python3 main.py [OPTIONS]
 - `--use-nir`: Enable the 4-channel (RGB+NIR) model (Note: Not supported when using `--use-gcs`)
 - `--use-gcs`: Stream training data from Google Cloud Storage
 - `--multimodal-qc`: Run multimodal quality control checks using Gemini 2.0
+- `--cloud-mask`: Export OmniCloudMask models to ONNX and test cloud coverage assessment on labeled data
 
 ### Examples
 1. **Run the wildfire classification model**:
@@ -122,6 +137,11 @@ python3 main.py [OPTIONS]
 6. **Run the model using Google Cloud Storage**:
    ```bash
    python3 main.py --run-model --use-gcs
+   ```
+
+7. **Test cloud mask preprocessing on labeled data**:
+   ```bash
+   python3 main.py --cloud-mask
    ```
 # Resources
 - [Deep Learning in OpenCV](https://github.com/opencv/opencv/wiki/Deep-Learning-in-OpenCV)
