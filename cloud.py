@@ -121,7 +121,7 @@ def test_onnx_inference(onnx_path, test_shape=(1, 3, 509, 509)):
 def test_on_labeled_images(onnx_path, data_dir="data/labeled", max_images=5):
     """
     Test OmniCloudMask ONNX model on labeled wildfire images.
-    
+
     Args:
         onnx_path: Path to ONNX model
         data_dir: Base directory containing 'yes' and 'no' subdirectories
@@ -129,34 +129,34 @@ def test_on_labeled_images(onnx_path, data_dir="data/labeled", max_images=5):
     """
     # Create ONNX runtime session
     ort_session = ort.InferenceSession(onnx_path)
-    
+
     # Class names for OmniCloudMask
     class_names = ['Clear', 'Thin Cloud', 'Thick Cloud', 'Cloud Shadow']
-    
+
     print(f"\n{'='*60}")
     print("TESTING ON LABELED WILDFIRE DATA")
     print(f"{'='*60}")
-    
-    for category in ['yes', 'no']:
+
+    for category in ['no', 'yes']:
         category_dir = Path(data_dir) / category
         if not category_dir.exists():
             print(f"Warning: Directory {category_dir} not found")
             continue
-            
+
         print(f"\n--- Testing on {category.upper()} (wildfire={category}) samples ---")
-        
+
         image_files = list(category_dir.glob("*.tiff")) + list(category_dir.glob("*.tif"))
-        
+
         for i, img_path in enumerate(image_files[:max_images]):
             try:
                 print(f"\n{i+1}. Processing: {img_path.name}")
-                
+
                 # Load image using OpenCV
                 img = cv2.imread(str(img_path), cv2.IMREAD_UNCHANGED)
                 if img is None:
                     print(f"   Error: Could not read {img_path}")
                     continue
-                
+
                 # Check number of channels
                 if len(img.shape) == 2:
                     # Grayscale - convert to RGB
@@ -175,47 +175,47 @@ def test_on_labeled_images(onnx_path, data_dir="data/labeled", max_images=5):
                 else:
                     print(f"   Unexpected number of channels: {img.shape[2]}")
                     continue
-                
+
                 # Get RGB channels (OpenCV uses BGR order)
                 blue = img[:, :, 0].astype(np.float32)
                 green = img[:, :, 1].astype(np.float32)
                 red = img[:, :, 2].astype(np.float32)
                 nir = nir.astype(np.float32)
-                
+
                 # Stack into (H, W, 3) format for normalization
                 # OmniCloudMask expects Red, Green, NIR order
                 rgb_nir_stack = np.stack([red, green, nir], axis=-1)
-                
+
                 # Apply z-score normalization
                 normalized = dyn_zscore_normalize(rgb_nir_stack)
-                
+
                 # Reshape to (3, H, W) for OmniCloudMask
                 input_array = np.transpose(normalized, (2, 0, 1))
-                
+
                 # Get original dimensions
                 _, h, w = input_array.shape
-                
+
                 # Resize to 509x509 using OpenCV
                 # First transpose back to (H, W, C) for cv2.resize
                 input_hwc = np.transpose(input_array, (1, 2, 0))
                 input_resized = cv2.resize(input_hwc, (509, 509), interpolation=cv2.INTER_LINEAR)
-                
+
                 # Transpose back to (C, H, W)
                 input_resized = np.transpose(input_resized, (2, 0, 1))
-                
+
                 # Add batch dimension
                 input_batch = np.expand_dims(input_resized, axis=0).astype(np.float32)
-                
+
                 # Run inference
                 ort_inputs = {ort_session.get_inputs()[0].name: input_batch}
                 ort_outputs = ort_session.run(None, ort_inputs)
-                
+
                 # Get predictions (shape: [1, 4, 509, 509])
                 predictions = ort_outputs[0][0]  # Remove batch dimension
-                
+
                 # Get class predictions
                 predicted_classes = np.argmax(predictions, axis=0)
-                
+
                 # Calculate percentage of each class
                 total_pixels = predicted_classes.size
                 class_percentages = {}
@@ -223,16 +223,16 @@ def test_on_labeled_images(onnx_path, data_dir="data/labeled", max_images=5):
                     pixel_count = np.sum(predicted_classes == cls_idx)
                     percentage = (pixel_count / total_pixels) * 100
                     class_percentages[cls_name] = percentage
-                
+
                 print(f"   Original size: {w}x{h}")
                 print("   Cloud mask predictions:")
                 for cls_name, percentage in class_percentages.items():
                     print(f"     - {cls_name}: {percentage:.1f}%")
-                
+
                 # Calculate overall cloud coverage
                 cloud_coverage = class_percentages['Thin Cloud'] + class_percentages['Thick Cloud'] + class_percentages['Cloud Shadow']
                 print(f"   Total cloud/shadow coverage: {cloud_coverage:.1f}%")
-                
+
             except Exception as e:
                 print(f"   Error processing {img_path.name}: {e}")
                 import traceback
@@ -270,11 +270,11 @@ def main():
             if config["output_path"].exists():
                 print(f"ONNX model already exists at {config['output_path']}")
                 print("Skipping export, testing on labeled data...")
-                
+
                 # Test on labeled wildfire data
                 test_on_labeled_images(config["output_path"])
                 continue
-            
+
             # Check if weights file exists
             if not config["weights_path"].exists():
                 print(f"Warning: Weights file not found at {config['weights_path']}")
@@ -301,7 +301,7 @@ def main():
             # Test ONNX inference
             print(f"\n3. Testing ONNX inference")
             test_onnx_inference(config["output_path"])
-            
+
             # Test on labeled wildfire data
             print(f"\n4. Testing on labeled wildfire images")
             test_on_labeled_images(config["output_path"])
