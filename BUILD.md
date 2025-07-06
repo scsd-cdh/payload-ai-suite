@@ -32,29 +32,29 @@ This will create a **uv.lock** file if one does not already exist.
 
 ## Common Commands
 
-Install packages
+Install packages:
 ```uv add $PACKAGE```
 
-Remove packages
+Remove packages:
 ``` uv remove $PACKAGE ```
 
-Create a .venv virtual environment.
+Create a .venv virtual environment:
 ```uv venv``` 
 
-Ensure all project dependencies are installed and up-to-date with the environment.
+Ensure all project dependencies are installed and up-to-date with the environment:
 ```uv sync```
 
-Run scripts
+Run scripts:
 ```uv run $SCRIPT.py```
 
-Run commands
+Run commands:
 ``` uv run main.py $FLAG ``` 
 
-Changing python versions
+Changing python versions:
 ``` uv python pin $VERSION ```
 
-Install specific Python version
+Install specific Python version:
 ```uv python install 3.10.5```
 
-Will give a tree of dependencies being used in the project
+Will give a tree of dependencies being used in the project:
 ``` uv tree ```
