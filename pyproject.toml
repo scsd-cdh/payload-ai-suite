@@ -22,4 +22,5 @@ dependencies = [
     "selenium==4.32.0",
     "tensorflow==2.18.0",
     "tf2onnx==1.16.1",
+    "torch",
 ]
