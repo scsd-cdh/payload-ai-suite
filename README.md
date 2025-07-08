@@ -4,7 +4,7 @@ Collection of software tools for multispectral image analysis and model testing.
 # Features
 - Cross-reference FIRMS fire event/EoNet and query via Copernicus's process API.
 - Run VGG model on labeled (fire/no fire) data.
-- Preproces RGB-NIR algorithm
+- Preprocess RGB-NIR algorithm
 - Optional NIR channel support for RGB-NIR 4 channel tensor model.
 - Cloud mask preprocessing to check cloud coverage threshold before wildfire inference.
 
