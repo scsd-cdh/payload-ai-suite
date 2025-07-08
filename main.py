@@ -71,7 +71,11 @@ if __name__ == "__main__":
         import mlops
         mlops.run_multimodal_qc(use_gcs=args.use_gcs)
     elif args.process_sen2fire:
+<<<<<<< HEAD
         convert_sen2fire_labeled(root_dir="data/sen2fire", output_dir="data/labeled", use_nir=args.use_nir)
+=======
+        args.convert_sen2fire_labeled(root_dir="data/sen2fire", output_dir="data/labeled", use_nir=args.use_nir)
+>>>>>>> 37d6cd6 (spelling)
     elif args.cloud_mask:
 
         cloud.main()
