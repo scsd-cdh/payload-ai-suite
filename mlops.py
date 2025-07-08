@@ -6,13 +6,12 @@ import tempfile
 import time
 from typing import List, Optional
 
-# added
-# from dotenv import load_dotenv
 
 from google import genai
 from google.cloud import storage
 
-# Load environment variables from .env file
+# Uncomment to load environment variables from .env file
+# from dotenv import load_dotenv
 # load_dotenv() 
 
 api_key = os.getenv("GEMINI_API_KEY")
