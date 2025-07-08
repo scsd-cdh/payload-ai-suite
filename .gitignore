@@ -5,6 +5,7 @@ __pycache__/
 
 # Virtual environment
 venv/
+.venv/
 .env/
 
 # Environment variables
@@ -38,3 +39,13 @@ geckodriver
 
 # Claude Code configuration
 CLAUDE.md
+
+# Python version
+.python-version
+
+
+# training checkpoints
+training_checkpoints
+
+#  onnx files
+*.onnx

@@ -72,3 +72,5 @@ if __name__ == "__main__":
         cloud.main()
     else:
         print("No valid arguments provided. Use -h for help.")
+ #     print("No valid arguments provided. Use -h for help.")
+
