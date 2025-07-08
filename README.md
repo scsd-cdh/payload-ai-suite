@@ -68,9 +68,13 @@ If you have GCS access, set these additional environment variables:
 
 ## Prerequisites
 1. **Python**: Ensure Python 3.8 or higher is installed.
-2. **Dependencies**: Install the required Python packages:
+2. **uv**: Install uv package manager:
    ```bash
-   pip install -r requirements.txt
+   curl -LsSf https://astral.sh/uv/install.sh | sh
+   ```
+3. **Dependencies**: Install the required Python packages:
+   ```bash
+   uv sync
    ```
 
 ## Running the CLI
