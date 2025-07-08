@@ -67,5 +67,4 @@ if __name__ == "__main__":
         mlops.run_multimodal_qc(use_gcs=args.use_gcs)
     else:
         print("No valid arguments provided. Use -h for help.")
- #     print("No valid arguments provided. Use -h for help.")
 
