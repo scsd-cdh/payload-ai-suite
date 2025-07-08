@@ -41,7 +41,7 @@ def load_omnicloudmask_model(weights_path, model_name="regnety_004", device="cpu
     model = create_unet_model(
         arch=timm_model,
         n_out=4,  # 4 output classes for cloud mask
-        img_size=(509, 509),  # OmniCloudMask uses 509x509 patches
+        img_size=(512, 512),
         act_cls=torch.nn.Mish,
         pretrained=True,
     )
@@ -54,7 +54,7 @@ def load_omnicloudmask_model(weights_path, model_name="regnety_004", device="cpu
     return model.to(device)
 
 
-def export_to_onnx(model, output_path, dummy_input_shape=(1, 3, 509, 509)):
+def export_to_onnx(model, output_path, dummy_input_shape=(1, 3, 512, 512)):
     """
     Export PyTorch model to ONNX format.
 
@@ -210,7 +210,7 @@ def test_on_labeled_images(onnx_path, data_dir="data/labeled", max_images=5):
                 ort_inputs = {ort_session.get_inputs()[0].name: input_batch}
                 ort_outputs = ort_session.run(None, ort_inputs)
 
-                # Get predictions (shape: [1, 4, 509, 509])
+                # Get predictions (shape: [1, 4, 512, 512])
                 predictions = ort_outputs[0][0]  # Remove batch dimension
 
                 # Get class predictions
