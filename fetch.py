@@ -583,26 +583,34 @@ def convert_sen2fire_labeled(root_dir="data/sen2fire", output_dir="data/labeled"
                 mask = data["label"]  # shape: (H, W)
 
                 # if fire is present if the pixel is 1
-                fire_present = int(np.any(mask))
+                fire_present = int(np.any(mask)) # collection of fire data
                 # override if fire is actually present
                 final_label = "yes" if fire_present else "no"
 
-                # Extract RGB or RGB+NIR
-                channels = [3, 2, 1]  # R, G, B
-                if use_nir:
-                    channels.append(7)  # NIR if present
+                # Extract RGB
+                channels = [3, 2, 1]  
+                # B2 - Blue (1) python index
+                # B3 - Green (2)
+                # B4 - Red (3)
+                
+                if use_nir: # NIR Band 
+                    channels.append(7) # B8 - NIR (7)
 
                 img_crop = img[:, :, channels]  # shape: (512, 512, 3 or 4)
 
                 # Normalize to 0–255 for transferring into numpy img
-                img_norm = (img_crop / img_crop.max()) * 255
-                img_norm = img_norm.astype(np.uint8)
-                # output file 
+                img_norm = (img_crop / img_crop.max()) * 255 # img content comes from img_norm array 
+                img_norm = img_norm.astype(np.uint8) # image pixel values
+                
+                # output file ----- does not change the filename 
                 out_file = os.path.join(output_dir, final_label, f"{scene}_{fname.replace('.npz', '.png')}") # goes into the dataset based on yes or no
-                if use_nir:
-                    np.save(out_file.replace(".png", ".npy"), img_norm)  # save 4-channel image as .npy or 3-channel for .png
-                else:
-                    Image.fromarray(img_norm).save(out_file)
+                
+                #combines the filename from the folder path 
+                if use_nir: # if image has 4-channels -> .npy 
+                    np.save(out_file.replace(".png", ".npy"), img_norm)  # writing raw numpy data
+                
+                else: # 3-channel -> .png
+                    Image.fromarray(img_norm).save(out_file) # saves as a real PNG file
 
             except Exception as e: # logging errors
                 logger.warning(f"Failed to process {fpath}: {e}")
