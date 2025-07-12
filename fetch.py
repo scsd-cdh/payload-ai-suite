@@ -20,6 +20,11 @@ from selenium import webdriver
 from selenium.webdriver.common.by import By
 from pyproj import Proj, Transformer
 
+from dotenv import load_dotenv
+from tabulate import tabulate
+from sqlalchemy import create_engine, Column, Integer, Float, String, Date, Time
+from sqlalchemy.orm import declarative_base, Session
+
 import logging
 logger = logging.getLogger(__name__)
 
@@ -102,24 +107,74 @@ class ProgressTracker:
         self.save_progress()
 
 
-def nasa_firms_api():
+def nasa_firms_api(sensor="VIIRS_NOAA21_NRT", country="CAN", days=7, db_path="fires.db"):
     """
-    Fetches data availability from NASA FIRMS API.
+    Fetches recent fire event data from NASA FIRMS API, filters, displays, and saves it.
 
-    This function uses the NASA FIRMS API to retrieve data availability in CSV format.
-    The API key is retrieved from the environment variable `NASA_KEY`.
-
-    https://firms.modaps.eosdis.nasa.gov/api/ Fire Information for Resource Management System
-    /api/area/csv/[NASA_KEY]/[SOURCE]/[AREA_COORDINATES]/[DAY_RANGE]/[DATE]
+    Args:
+        sensor (str): Sensor name (e.g., "VIIRS_NOAA21_NRT", "VIIRS_NOAA20_NRT").
+        country (str): Country code (default: "CAN").
+        days (int): Number of past days to retrieve data for (default: 7).
+        db_path (str): Path to the SQLite database file.
 
     Returns:
-        pd.DataFrame: A DataFrame containing the data availability information for NASA FIRMS.
+        pd.DataFrame: A DataFrame with filtered fire event data.
     """
-    # TODO: Implement AREA_COORDINATES and DAY_RANGE etc. parameters for API call
+
     NASA_KEY = os.getenv("NASA_KEY")
-    data_url = 'https://firms.modaps.eosdis.nasa.gov/api/data_availability/csv/' + NASA_KEY + '/all'
-    data_frame = pd.read_csv(data_url)
-    return data_frame
+    Base = declarative_base()
+    if not NASA_KEY:
+        raise ValueError("NASA_KEY not found in environment variables")
+    
+    # Remove existing database file if it exists
+    if os.path.exists(db_path):
+        os.remove(db_path)
+
+    # FireEvent class
+    class FireEvent(Base):
+        __tablename__ = "fire_events"
+        id = Column(Integer, primary_key=True, autoincrement=True)
+        satellite = Column(String)
+        latitude = Column(Float)
+        longitude = Column(Float)
+        acq_date = Column(String)
+        acq_time = Column(String)
+        confidence = Column(String)
+        frp = Column(Float)
+
+    url = f"https://firms.modaps.eosdis.nasa.gov/api/country/csv/{NASA_KEY}/{sensor}/{country}/{days}"
+    df = pd.read_csv(url)
+
+    filtered = df[["satellite", "latitude", "longitude", "acq_date", "acq_time", "confidence", "frp"]]
+
+    print(f"\nFire Events from {sensor}")
+    print(tabulate(filtered.head(10), headers="keys", tablefmt="fancy_grid"))
+
+    # Save to JSON
+    json_file = f"{sensor.lower()}_fires.json"
+    filtered.to_json(json_file, orient="records", indent=2)
+    print(f"------------------------------Saved to {json_file}------------------------------\n")
+
+    # Save to DB
+    engine = create_engine(f"sqlite:///{db_path}")
+    Base.metadata.create_all(engine)
+    with Session(engine) as session:
+        for _, row in filtered.iterrows():
+            event = FireEvent(
+                satellite=row["satellite"],
+                latitude=row["latitude"],
+                longitude=row["longitude"],
+                acq_date=row["acq_date"],
+                acq_time=row["acq_time"],
+                confidence=row["confidence"],
+                frp=row["frp"]
+            )
+            session.add(event)
+        session.commit()
+
+    print(f"Saved {len(filtered)} fire events to {db_path}")
+    return filtered
+
 
 
 def setup_auth():

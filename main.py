@@ -57,7 +57,8 @@ if __name__ == "__main__":
     if args.run_model:
         model.train(use_nir=args.use_nir, use_gcs=args.use_gcs)
     elif args.nasa_firms:
-        nasa_firms_api()
+        for sensor in ["VIIRS_NOAA21_NRT", "VIIRS_NOAA20_NRT"]:
+            nasa_firms_api(sensor)
     elif args.setup_auth:
         setup_auth()
     elif args.batch_download:
