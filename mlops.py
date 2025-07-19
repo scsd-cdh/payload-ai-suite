@@ -12,13 +12,17 @@ from google.cloud import storage
 
 # Uncomment to load environment variables from .env file
 # from dotenv import load_dotenv
-# load_dotenv() 
+# load_dotenv()
 
-api_key = os.getenv("GEMINI_API_KEY")
+GEMINI_AVAILABLE = False
+
 try:
+    api_key = os.getenv("GEMINI_API_KEY")
     client = genai.Client(api_key=api_key)
+    if client:
+        GEMINI_AVAILABLE = True
 except Exception as e:
-    print(f"{e}: no google api key found in environment")
+    print(f"{e}: no google api key found in environment.")
 
 class GCSHandler:
     """Handler for Google Cloud Storage operations with streaming support."""
@@ -288,9 +292,12 @@ def run_multimodal_qc(use_gcs=False):
         print(f"Found {len(image_files)} images locally to process")
 
         # Process each file from local directory
-        for file_path in image_files:
-            try:
-                multimodal_qc(file_path)
-            except Exception as e:
-                logging.error(f"Error processing {file_path}: {str(e)}")
-                continue
+        if GEMINI_AVAILABLE:
+            for file_path in image_files:
+                try:
+                    multimodal_qc(file_path)
+                except Exception as e:
+                    logging.error(f"Error processing {file_path}: {str(e)}")
+                    continue
+        else:
+            print(f"Multimodal qc not available. Genai client not set")

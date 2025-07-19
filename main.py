@@ -2,7 +2,6 @@
 """
 import argparse
 import model
-import mlops
 import cloud
 from fetch import (
     nasa_firms_api,
@@ -67,9 +66,10 @@ if __name__ == "__main__":
     elif args.copernicus_query:
         copernicus_sentiel_query(use_gcs=args.use_gcs)
     elif args.multimodal_qc:
+        import mlops
         mlops.run_multimodal_qc(use_gcs=args.use_gcs)
     elif args.cloud_mask:
+        
         cloud.main()
     else:
         print("No valid arguments provided. Use -h for help.")
-
