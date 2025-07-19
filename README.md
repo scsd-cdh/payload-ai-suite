@@ -96,7 +96,7 @@ The project provides a CLI interface via `main.py`. Use the following commands t
 
 ### General Usage
 ```bash
-python3 main.py [OPTIONS]
+uv run main.py [OPTIONS]
 ```
 
 ### Available Options
@@ -116,36 +116,36 @@ python3 main.py [OPTIONS]
 ### Examples
 1. **Run the wildfire classification model**:
    ```bash
-   python3 main.py --run-model
+   uv run main.py --run-model
    ```
 
 2. **Fetch wildfire data from the EONET API**:
    ```bash
-   python3 main.py --eonet-crossref
+   uv run main.py --eonet-crossref
    ```
 
 3. **Query Sentinel data with a bounding box and time range**:
    ```bash
-   python3 main.py --copernicus-query --coordinates -59.75 -19.91 -58.72 -19.06 --time-range 2023-01-01T00:00:00Z 2023-01-03T23:59:59Z
+   uv run main.py --copernicus-query --coordinates -59.75 -19.91 -58.72 -19.06 --time-range 2023-01-01T00:00:00Z 2023-01-03T23:59:59Z
    ```
 
 4. **Download images using Selenium**:
    ```bash
-   python3 main.py --batch-download
+   uv run main.py --batch-download
    ```
 5. **Run the wildfire classification model with simulated NIR**:
    ```bash
-   python3 main.py --run-model --use-nir
+   uv run main.py --run-model --use-nir
    ```
 
 6. **Run the model using Google Cloud Storage**:
    ```bash
-   python3 main.py --run-model --use-gcs
+   uv run main.py --run-model --use-gcs
    ```
 
 7. **Test cloud mask preprocessing on labeled data**:
    ```bash
-   python3 main.py --cloud-mask
+   uv run main.py --cloud-mask
    ```
 # Resources
 - [Deep Learning in OpenCV](https://github.com/opencv/opencv/wiki/Deep-Learning-in-OpenCV)
