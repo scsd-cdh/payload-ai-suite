@@ -9,10 +9,9 @@ import time
 import os
 from mlops import GCSHandler
 from datetime import datetime
-
-
 from oauthlib.oauth2 import BackendApplicationClient
 from requests_oauthlib import OAuth2Session
+from bs4 import BeautifulSoup
 
 import pandas as pd
 import pygeohash as pgh
@@ -493,6 +492,74 @@ def copernicus_sentiel_query(use_gcs=False, amount=135):
             # Mark location as failed on any exception
             progress_tracker.update_event_progress(location.geohash, location_index=0, status="failed")
             print(f"Exception processing location {location.geohash}: {e}")
+
+def enmap_eoweb_login():
+    """
+    Logs into the EnMAP EOWEB GeoPortal and returns an authenticated session.
+
+    Required in .env:
+    - ENMAP_USERNAME
+    - ENMAP_PASSWORD
+    """
+
+    username = os.getenv("ENMAP_USERNAME")
+    password = os.getenv("ENMAP_PASSWORD")
+
+    if not username or not password:
+        raise ValueError("ENMAP_USERNAME and ENMAP_PASSWORD must be set in environment variables.")
+
+
+    session = requests.Session()
+
+    # Initial CAS login form request
+    cas_login_url = "https://sso.eoc.dlr.de/eoc/auth/login"
+    service_url = "https://eoweb.dlr.de/egp/login/cas"
+
+    params = {
+        "service": service_url
+    }
+
+    response = session.get(cas_login_url, params=params)
+    soup = BeautifulSoup(response.text, "html.parser")
+
+    # Extract required hidden fields from the login form
+    hidden_inputs = soup.find_all("input", type="hidden")
+    form_data = {input["name"]: input.get("value", "") for input in hidden_inputs}
+    form_data.update({
+        "username": username,
+        "password": password,
+        "_eventId": "submit"
+    })
+
+    # Submit the login form
+    login_response = session.post(cas_login_url, params=params, data=form_data, allow_redirects=True)
+
+    if "eoweb.dlr.de" in login_response.url or "logout" in login_response.text:
+        print("[CAS] Login successful.")
+        return session
+    else:
+        raise RuntimeError(f"[CAS] Login failed. Status: {login_response.status_code}, redirect URL: {login_response.url}")
+
+def enmap_fire_query(amount=135, use_gcs=False):
+    """
+    Simulates querying EnMAP data for fire locations from EONET events.
+    This mirrors copernicus_sentiel_query but prepares EnMAP download logic.
+
+    Args:
+        amount (int): Number of fire locations to process
+        use_gcs (bool): Whether to upload to Google Cloud Storage
+    """
+
+    # Login
+    session = enmap_eoweb_login()
+    result = session.get("https://eoweb.dlr.de/egp/search")
+    print(result.text[:500])  # Check if logged in
+
+    # Load fire events and initialize
+    progress_tracker = ProgressTracker()
+    locations = create_locations(amount=amount, progress_tracker=progress_tracker)
+    print(f"Will process {len(locations)} unprocessed locations")
+
 
 def batch_data_downloader_selenium(url=None, max_pages=9):
     """Downloads images from a Flickr album using Selenium.
