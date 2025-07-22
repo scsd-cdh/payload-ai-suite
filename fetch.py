@@ -598,6 +598,15 @@ def convert_sen2fire_labeled(root_dir="data/sen2fire", output_dir="data/labeled"
 
                 img_crop = img[:, :, channels]  # shape: (512, 512, 3 or 4)
 
+                #shapes of the images should be formatted with 512 x 512 height
+                if img_crop.shape[0] == 13:
+                    logger.warning(f"Transposing channels on {fname}")
+                    img_crop = np.transpose(img_crop, (1, 2, 0))
+
+                #checking for correct height and width
+                assert img_crop.shape[0] == 512 and img_crop.shape[1] == 512, \
+                    f"Unexpected image shape: {img_crop.shape}"# error
+
                 # Normalize to 0–255 for transferring into numpy img
                 img_norm = (img_crop / img_crop.max()) * 255 # img content comes from img_norm array 
                 img_norm = img_norm.astype(np.uint8) # image pixel values
