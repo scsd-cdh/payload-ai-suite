@@ -579,7 +579,7 @@ def convert_sen2fire_labeled(root_dir="data/sen2fire", output_dir="data/labeled"
             fpath = os.path.join(scene_path, fname)
             try:
                 data = np.load(fpath) # loading the data
-                img = data["image"]  # shape: (12, H, W) -- 13 bands with 512 x 512 patches 
+                img = data["image"]  # shape: (12, H, W) -- 13 bands with 512 x 512 patches
                 mask = data["label"]  # shape: (H, W)
 
                 # if fire is present if the pixel is 1
@@ -599,8 +599,6 @@ def convert_sen2fire_labeled(root_dir="data/sen2fire", output_dir="data/labeled"
                 img_crop = img[channels, :, :]  # shape: (512, 512, 3 or 4)
 
                 #shapes of the images should be formatted with 512 x 512 height
-                if img_crop.shape[0] == 12:
-                    logger.warning(f"Transposing channels on {fname}")
                 img_crop = np.transpose(img_crop, (1, 2, 0))
 
                 #checking for correct height and width
