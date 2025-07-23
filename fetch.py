@@ -352,9 +352,9 @@ def create_locations(amount=135, progress_tracker=None):
     if progress_tracker:
         start_entry = progress_tracker.get_resume_point()
         print(f"Resuming from entry {start_entry}")
-    
+
     print(f"Creating locations from {start_entry} to {start_entry + amount}")
-    
+
     # Process 'amount' number of locations starting from start_entry
     for entry in range(start_entry, start_entry + amount):
         location = Location(coordinates[0][entry], time=time_ranges[entry])
@@ -425,7 +425,7 @@ def copernicus_sentiel_query(use_gcs=False, amount=135):
     locations = create_locations(amount=amount, progress_tracker=progress_tracker)
 
     print(f"Will process {len(locations)} unprocessed locations")
-    
+
     # Example code how to query copernicus sentiel 2 data and do explcit image processing evals with inline script.
     # Currently reading from the eo_net wildfire json file.
 
@@ -548,14 +548,14 @@ def batch_data_downloader_selenium(url=None, max_pages=9):
 def convert_sen2fire_labeled(root_dir="data/sen2fire", output_dir="data/labeled",  use_nir=False):
     """
     Based on:
-    Xu, Y., Berg, A., & Haglund, L. (2024). 
+    Xu, Y., Berg, A., & Haglund, L. (2024).
     Sen2Fire: A Challenging Benchmark Dataset for Wildfire Detection using Sentinel Data.
     arXiv preprint arXiv:2403.17884
 
     Converts Sen2Fire .npz files into RGB or RGB+NIR PNG images stored in labeled yes/no folders
 
     Args:
-        root_dir (str): Path to Sen2Fire dataset 
+        root_dir (str): Path to Sen2Fire dataset
         output_dir (str): Path to labeled data folder
     """
     #TODO: to access the npz files -> url:https://zenodo.org/records/10881058
@@ -564,7 +564,7 @@ def convert_sen2fire_labeled(root_dir="data/sen2fire", output_dir="data/labeled"
         "scene1": "yes",
         "scene2": "yes",
         # for validation
-        "scene3": "no",   
+        "scene3": "no",
         "scene4": "no"
     }
     # dataset folders
@@ -579,7 +579,7 @@ def convert_sen2fire_labeled(root_dir="data/sen2fire", output_dir="data/labeled"
             fpath = os.path.join(scene_path, fname)
             try:
                 data = np.load(fpath) # loading the data
-                img = data["image"]  # shape: (H, W, 13) -- 13 bands
+                img = data["image"]  # shape: (12, H, W) -- 13 bands with 512 x 512 patches 
                 mask = data["label"]  # shape: (H, W)
 
                 # if fire is present if the pixel is 1
@@ -588,36 +588,36 @@ def convert_sen2fire_labeled(root_dir="data/sen2fire", output_dir="data/labeled"
                 final_label = "yes" if fire_present else "no"
 
                 # Extract RGB
-                channels = [3, 2, 1]  
+                channels = [3, 2, 1]
                 # B2 - Blue (1) python index
                 # B3 - Green (2)
                 # B4 - Red (3)
-                
-                if use_nir: # NIR Band 
+
+                if use_nir: # NIR Band
                     channels.append(7) # B8 - NIR (7)
 
-                img_crop = img[:, :, channels]  # shape: (512, 512, 3 or 4)
+                img_crop = img[channels, :, :]  # shape: (512, 512, 3 or 4)
 
                 #shapes of the images should be formatted with 512 x 512 height
-                if img_crop.shape[0] == 13:
+                if img_crop.shape[0] == 12:
                     logger.warning(f"Transposing channels on {fname}")
-                    img_crop = np.transpose(img_crop, (1, 2, 0))
+                img_crop = np.transpose(img_crop, (1, 2, 0))
 
                 #checking for correct height and width
                 assert img_crop.shape[0] == 512 and img_crop.shape[1] == 512, \
                     f"Unexpected image shape: {img_crop.shape}"# error
 
                 # Normalize to 0–255 for transferring into numpy img
-                img_norm = (img_crop / img_crop.max()) * 255 # img content comes from img_norm array 
+                img_norm = (img_crop / img_crop.max()) * 255 # img content comes from img_norm array
                 img_norm = img_norm.astype(np.uint8) # image pixel values
-                
-                # output file ----- does not change the filename 
+
+                # output file ----- does not change the filename
                 out_file = os.path.join(output_dir, final_label, f"{scene}_{fname.replace('.npz', '.png')}") # goes into the dataset based on yes or no
-                
-                #combines the filename from the folder path 
-                if use_nir: # if image has 4-channels -> .npy 
+
+                #combines the filename from the folder path
+                if use_nir: # if image has 4-channels -> .npy
                     np.save(out_file.replace(".png", ".npy"), img_norm)  # writing raw numpy data
-                
+
                 else: # 3-channel -> .png
                     Image.fromarray(img_norm).save(out_file) # saves as a real PNG file
 
