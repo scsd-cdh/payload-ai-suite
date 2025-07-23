@@ -609,13 +609,12 @@ def convert_sen2fire_labeled(root_dir="data/sen2fire", output_dir="data/labeled"
                 img_norm = (img_crop / img_crop.max()) * 255 # img content comes from img_norm array
                 img_norm = img_norm.astype(np.uint8) # image pixel values
 
-                numpy_extension = '.npz'
-                if use_nir:
-                    numpy_extension = ".npy"
+                # numpy_extension = '.npz'
+                # if use_nir:
+                #     numpy_extension = ".npy"
 
-                out_file = os.path.join(output_dir, final_label, f"{scene}_{fname.replace(numpy_extension, '.png')}") # goes into the dataset based on yes or no
+                out_file = os.path.join(output_dir, final_label, f"{scene}_{fname.replace('.npz', '.png')}") # goes into the dataset based on yes or no
                 Image.fromarray(img_norm).save(out_file) # saves as a real PNG file
 
             except Exception as e: # logging errors
                 logger.warning(f"Failed to process {fpath}: {e}")
-                
