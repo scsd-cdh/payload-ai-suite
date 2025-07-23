@@ -48,11 +48,11 @@ def populate(X_array, y_array, path, use_nir=False, end=False, gcs_handler=None)
                     nir = np.expand_dims(nir, axis=-1)
                     # Shape (224, 224, 4)
                     rgb_nir = np.concatenate((rgb, nir), axis=-1)
-                    rgb_nir = dyn_zscore_normalize(rgb_nir) # normalization
+                    #rgb_nir = dyn_zscore_normalize(rgb_nir) # normalization
                    # print("normalized rgb-nir":, rgb_nir.mean(), rgb_nir.std())
                     X_array.append(rgb_nir)
                 else:
-                    rgb = dyn_zscore_normalize(rgb) # normalization
+                    #rgb = dyn_zscore_normalize(rgb) # normalization
                     #print("normalized rgb:", rgb.mean(), rgb_nir.std())
                     X_array.append(rgb)
 
