@@ -4,10 +4,7 @@ Features:
 - train
 - validate
 - export to onnx
-
-TODO:
-- optimize
-- more data!
+- mixed resolution operations for resolution-agnostic training
 
 """
 
@@ -28,7 +25,7 @@ from mlops import GCSHandler
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-def train(validate=False, epochs=12, use_nir=False, use_gcs=False):
+def train(validate=False, epochs=12, use_nir=False, use_gcs=False, use_mixed_res=False):
     """
     Train CNN VGG model on labeled data.
 
@@ -37,30 +34,50 @@ def train(validate=False, epochs=12, use_nir=False, use_gcs=False):
         epochs (int): Number of epochs to train the model.
         use_nir (bool): Whether to use NIR channel.
         use_gcs (bool): Whether to stream data from GCS.
+        use_mixed_res (bool): Whether to apply mixed resolution operations during training.
 
     Returns:
         None
     """
     X = []
     y = []
+    
+    # Define mixed resolution configuration
+    mixed_res_config = {
+        'use_random_resize': True,
+        'use_multi_resolution': True,
+        'use_resolution_mixup': True,
+        'min_scale': 0.5,
+        'max_scale': 1.5,
+        'resolution_scales': [0.5, 0.75, 1.0, 1.25, 1.5],
+        'mixup_alpha': 0.2
+    }
 
     if use_gcs:
         # Stream images from GCS
         try:
             gcs = GCSHandler()
 
-            # Pass GCS handler to populate function to stream from bucket
-            # The populate function will use gcs.list_images() and gcs.download_as_bytes()
-            X, y = preprocess.populate(X, y, "labeled/yes", use_nir=use_nir, gcs_handler=gcs)
-            X, y = preprocess.populate(X, y, "labeled/no", use_nir=use_nir, end=True, gcs_handler=gcs)
+            # Pass GCS handler and mixed_res options to populate function
+            X, y = preprocess.populate(X, y, "labeled/yes", use_nir=use_nir, 
+                                     gcs_handler=gcs, use_mixed_res=use_mixed_res, 
+                                     mixed_res_config=mixed_res_config)
+            X, y = preprocess.populate(X, y, "labeled/no", use_nir=use_nir, 
+                                     end=True, gcs_handler=gcs, 
+                                     use_mixed_res=use_mixed_res,
+                                     mixed_res_config=mixed_res_config)
 
         except Exception as e:
             logger.error(f"Failed to load data from GCS: {str(e)}")
             raise
     else:
-        # Use local files
-        X, y = preprocess.populate(X, y, "data/labeled/yes", use_nir=use_nir)
-        X, y = preprocess.populate(X, y, "data/labeled/no", use_nir=use_nir, end=True)
+        # Use local files with mixed resolution options
+        X, y = preprocess.populate(X, y, "data/labeled/yes", use_nir=use_nir,
+                                 use_mixed_res=use_mixed_res, 
+                                 mixed_res_config=mixed_res_config)
+        X, y = preprocess.populate(X, y, "data/labeled/no", use_nir=use_nir, 
+                                 end=True, use_mixed_res=use_mixed_res,
+                                 mixed_res_config=mixed_res_config)
 
     # TODO: Use numpy instead here
     X = [X[i] for i in range(min(len(X), len(y)))]
@@ -105,14 +122,14 @@ def train(validate=False, epochs=12, use_nir=False, use_gcs=False):
     for (i, layer) in enumerate(vgg.layers):
         print(str(i) + " " + layer.__class__.__name__, layer.trainable)
 
-        def create_top(bottom_model, num_classes):
-            top_model = bottom_model.output
-            top_model = keras.layers.GlobalAveragePooling2D()(top_model)
-            top_model = keras.layers.Dense(1024, activation='relu')(top_model)
-            top_model = keras.layers.Dense(1024, activation='relu')(top_model)
-            top_model = keras.layers.Dense(512, activation='relu')(top_model)
-            output = keras.layers.Dense(num_classes, activation='softmax')(top_model)
-            return output
+    def create_top(bottom_model, num_classes):
+        top_model = bottom_model.output
+        top_model = keras.layers.GlobalAveragePooling2D()(top_model)
+        top_model = keras.layers.Dense(1024, activation='relu')(top_model)
+        top_model = keras.layers.Dense(1024, activation='relu')(top_model)
+        top_model = keras.layers.Dense(512, activation='relu')(top_model)
+        output = keras.layers.Dense(num_classes, activation='softmax')(top_model)
+        return output
 
     num_classes = 2
     head = create_top(vgg, num_classes)
