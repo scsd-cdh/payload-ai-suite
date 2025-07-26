@@ -162,15 +162,15 @@ def retrieve_eonet_cross_reference():
     wildfire_url = "https://eonet.gsfc.nasa.gov/api/v3/categories/wildfires"
     response = requests.get(url=wildfire_url)
     data = response.json()
-    with open('events/categories.json', 'w', encoding='utf-8') as f:
+    with open('../events/categories.json', 'w', encoding='utf-8') as f:
          json.dump(data, f, ensure_ascii=False, indent=4)
 
 
-def extract_eonet_coordinates(file_path='events/categories.json'):
+def extract_eonet_coordinates(file_path='../events/categories.json'):
     """Extracts coordinates from the EONET categories JSON file.
 
     Args:
-        file_path (str): Path to the JSON file containing EONET wildfire events. Defaults to 'events/categories.json'.
+        file_path (str): Path to the JSON file containing EONET wildfire events. Defaults to '../events/categories.json'.
 
     Returns:
         list: A list of coordinates in the format [[lon, lat], [lon, lat], ...].
@@ -196,11 +196,11 @@ def extract_eonet_coordinates(file_path='events/categories.json'):
         print(f"Error extracting coordinates: {e}")
         return None
 
-def extract_time_ranges_from_eonet(file_path='events/categories.json'):
+def extract_time_ranges_from_eonet(file_path='../events/categories.json'):
     """Extracts time ranges from the EONET categories JSON file and converts them to the required format.
 
     Args:
-        file_path (str): Path to the JSON file containing EONET wildfire events. Defaults to 'events/categories.json'.
+        file_path (str): Path to the JSON file containing EONET wildfire events. Defaults to '../events/categories.json'.
 
     Returns:
         list of dict: A list of time ranges in the format [{"from": "YYYY-MM-DDTHH:MM:SSZ", "to": "YYYY-MM-DDTHH:MM:SSZ"}].
@@ -282,7 +282,7 @@ def write_image(response, metadata, location=None, use_gcs=False):
                 raise
         else:
             # Save locally
-            filename = f"./data/eonet_fire_events/{location.geohash}.{output_format}"
+            filename = f"../data/eonet_fire_events/{location.geohash}.{output_format}"
 
             # Write the response content data to a image file
             with open(filename, 'wb') as f:
@@ -508,7 +508,7 @@ def batch_data_downloader_selenium(url=None, max_pages=9):
     """
     # TODO: Hardcoded url for now, if needed expose this for customization
     url = "https://www.flickr.com/photos/esa_events/albums/72157716491073681/"
-    destination = "./data/labeled/no"
+    destination = "../data/labeled/no"
     driver = webdriver.Chrome()  # Make sure you have chromedriver installed
     driver.get(url)
     downloaded = 0
@@ -545,7 +545,7 @@ def batch_data_downloader_selenium(url=None, max_pages=9):
     return downloaded
 
 
-def convert_sen2fire_labeled(root_dir="data/sen2fire", output_dir="data/labeled",  use_nir=False):
+def convert_sen2fire_labeled(root_dir="../data/sen2fire", output_dir="../data/labeled",  use_nir=False):
     """
     Based on:
     Xu, Y., Berg, A., & Haglund, L. (2024).

@@ -190,9 +190,9 @@ def multimodal_qc(file_input, file_name=None, use_gcs=False, gcs_handler=None):
 
     # Determine output path
     if binary_output == "fire":
-        output_path = "labeled/yes" if use_gcs else "data/labeled/yes"
+        output_path = "labeled/yes" if use_gcs else "../data/labeled/yes"
     else:
-        output_path = "labeled/no" if use_gcs else "data/labeled/no"
+        output_path = "labeled/no" if use_gcs else "../data/labeled/no"
 
     # Save to appropriate location
     if use_gcs and gcs_handler:
@@ -283,10 +283,10 @@ def run_multimodal_qc(use_gcs=False):
 
     if not use_gcs:
         # Standard local file processing
-        image_files = glob.glob("data/eonet_fire_events/to_process/*")
+        image_files = glob.glob("../data/eonet_fire_events/to_process/*")
 
         if not image_files:
-            print("No images found locally in data/eonet_fire_events/to_process/")
+            print("No images found locally in ../data/eonet_fire_events/to_process/")
             return
 
         print(f"Found {len(image_files)} images locally to process")

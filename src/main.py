@@ -68,10 +68,10 @@ if __name__ == "__main__":
     elif args.copernicus_query:
         copernicus_sentiel_query(use_gcs=args.use_gcs)
     elif args.multimodal_qc:
-        import src.mlops as mlops
+        import mlops
         mlops.run_multimodal_qc(use_gcs=args.use_gcs)
     elif args.process_sen2fire:
-        convert_sen2fire_labeled(root_dir="data/sen2fire", output_dir="data/labeled", use_nir=args.use_nir)
+        convert_sen2fire_labeled(root_dir="../data/sen2fire", output_dir="../data/labeled", use_nir=args.use_nir)
     elif args.cloud_mask:
 
         cloud.main()

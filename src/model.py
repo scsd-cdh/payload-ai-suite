@@ -59,8 +59,8 @@ def train(validate=False, epochs=12, use_nir=False, use_gcs=False):
             raise
     else:
         # Use local files
-        X, y = preprocess.populate(X, y, "data/labeled/yes", use_nir=use_nir)
-        X, y = preprocess.populate(X, y, "data/labeled/no", use_nir=use_nir, end=True)
+        X, y = preprocess.populate(X, y, "../data/labeled/yes", use_nir=use_nir)
+        X, y = preprocess.populate(X, y, "../data/labeled/no", use_nir=use_nir, end=True)
 
     # TODO: Use numpy instead here
     X = [X[i] for i in range(min(len(X), len(y)))]
@@ -181,9 +181,9 @@ def export_to_onnx(model):
         input_signature=input_signature,
         opset=13  # Specify ONNX opset version
     )
-    onnx.save(onnx_model, 'zetane.onnx')
+    onnx.save(onnx_model, '../zetane.onnx')
 
-def run_inference(onnx_model="zetane.onnx", data_target=None):
+def run_inference(onnx_model="../zetane.onnx", data_target=None):
     if not data_target.any():
         print("Please provide a test target")
         return
