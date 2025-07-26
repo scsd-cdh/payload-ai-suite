@@ -15,7 +15,7 @@ from fastai.vision.learner import create_unet_model
 import onnx
 import onnxruntime as ort
 import cv2
-from src.preprocess import dyn_zscore_normalize
+from preprocess import dyn_zscore_normalize
 
 def load_omnicloudmask_model(weights_path, model_name="regnety_004", device="cpu"):
     """
