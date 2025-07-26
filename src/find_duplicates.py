@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Find duplicate files in the data/labeled directory by comparing checksums.
+Find duplicate files in the ../data/labeled directory by comparing checksums.
 """
 
 import os
@@ -48,7 +48,7 @@ def find_duplicates(directory):
 
 
 def main():
-    directory = "/home/kp/dev/space/payload-ai-suite/data/labeled"
+    directory = "../data/labeled"
 
     print(f"Scanning for duplicate files in: {directory}")
     print("This may take a moment...")
