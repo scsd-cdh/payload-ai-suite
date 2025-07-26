@@ -10,6 +10,7 @@ from fetch import (
     batch_data_downloader_selenium,
     retrieve_eonet_cross_reference,
     copernicus_sentiel_query,
+    enmap_fire_query
 )
 
 if __name__ == "__main__":
@@ -52,6 +53,7 @@ if __name__ == "__main__":
     parser.add_argument('--multimodal-qc', required=False, action='store_true', help="Run multimodal quality control check")
     parser.add_argument('--use-gcs', required=False, action='store_true', help="Stream training data from Google Cloud Storage")
     parser.add_argument('--cloud-mask', required=False, action='store_true', help="Export OmniCloudMask models to ONNX and test on labeled data")
+    parser.add_argument('--enmap-query', required=False, action='store_true', help="Cross-reference wildfire events and query EnMAP via CAS login")
 
     args = parser.parse_args()
     if args.run_model:
@@ -70,6 +72,8 @@ if __name__ == "__main__":
         mlops.run_multimodal_qc(use_gcs=args.use_gcs)
     elif args.cloud_mask:
         cloud.main()
+    elif args.enmap_query:
+        enmap_fire_query(use_gcs=args.use_gcs)
     else:
         print("No valid arguments provided. Use -h for help.")
 

@@ -7,17 +7,27 @@ import requests
 import json
 import time
 import os
+
+
 from mlops import GCSHandler
 from datetime import datetime
 from oauthlib.oauth2 import BackendApplicationClient
 from requests_oauthlib import OAuth2Session
 from bs4 import BeautifulSoup
+from dotenv import load_dotenv
+load_dotenv()
 
 import pandas as pd
 import pygeohash as pgh
 from selenium import webdriver
 from selenium.webdriver.common.by import By
+from selenium.webdriver.common.keys import Keys
+from selenium.webdriver.chrome.options import Options
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+
 from pyproj import Proj, Transformer
+
 
 import logging
 logger = logging.getLogger(__name__)
@@ -493,52 +503,187 @@ def copernicus_sentiel_query(use_gcs=False, amount=135):
             progress_tracker.update_event_progress(location.geohash, location_index=0, status="failed")
             print(f"Exception processing location {location.geohash}: {e}")
 
-def enmap_eoweb_login():
-    """
-    Logs into the EnMAP EOWEB GeoPortal and returns an authenticated session.
 
-    Required in .env:
-    - ENMAP_USERNAME
-    - ENMAP_PASSWORD
+def enmap_selenium_login():
+    """
+    Logs into the EOWEB GeoPortal via Selenium and returns a Selenium browser instance.
+
+    Returns: driver
+
     """
 
+    from dotenv import load_dotenv
+    load_dotenv()
+
+    # Load env variables
     username = os.getenv("ENMAP_USERNAME")
     password = os.getenv("ENMAP_PASSWORD")
 
     if not username or not password:
-        raise ValueError("ENMAP_USERNAME and ENMAP_PASSWORD must be set in environment variables.")
+        raise ValueError("ENMAP_USERNAME and ENMAP_PASSWORD must be set in .env")
 
+    # Set up Chrome instance
+    options = Options()
+    options.add_argument("--start-maximized")
 
-    session = requests.Session()
+    # Go to URL
+    driver = webdriver.Chrome(options=options)
+    driver.get("https://sso.eoc.dlr.de/eoc/auth/login?service=https%3A%2F%2Feoweb.dlr.de%2Fegp%2Flogin%2Fcas")
 
-    # Initial CAS login form request
-    cas_login_url = "https://sso.eoc.dlr.de/eoc/auth/login"
-    service_url = "https://eoweb.dlr.de/egp/login/cas"
+    # Wait and fill login form information
+    WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.NAME, "username")))
+    driver.find_element(By.NAME, "username").send_keys(username)
+    driver.find_element(By.NAME, "password").send_keys(password)
+    driver.find_element(By.NAME, "submitBtn").click()
 
-    params = {
-        "service": service_url
-    }
-
-    response = session.get(cas_login_url, params=params)
-    soup = BeautifulSoup(response.text, "html.parser")
-
-    # Extract required hidden fields from the login form
-    hidden_inputs = soup.find_all("input", type="hidden")
-    form_data = {input["name"]: input.get("value", "") for input in hidden_inputs}
-    form_data.update({
-        "username": username,
-        "password": password,
-        "_eventId": "submit"
-    })
-
-    # Submit the login form
-    login_response = session.post(cas_login_url, params=params, data=form_data, allow_redirects=True)
-
-    if "eoweb.dlr.de" in login_response.url or "logout" in login_response.text:
-        print("[CAS] Login successful.")
-        return session
+    # Wait for redirect to EOWEB
+    time.sleep(5)
+    if "eoweb.dlr.de/egp/main" in driver.current_url:
+        print("[ENMAP] Successfully logged into EOWEB.")
     else:
-        raise RuntimeError(f"[CAS] Login failed. Status: {login_response.status_code}, redirect URL: {login_response.url}")
+        print("[ENMAP] Login may have failed. Current URL:", driver.current_url)
+
+    return driver
+
+
+def set_time_range(driver, start_date, end_date):
+    """
+    This is a helper function to set the location time ranges for EOWEB search
+
+    Args:
+        driver: selenium webdriver instance
+        start_date: start date based on location
+        end_date: end date based on location
+
+    Returns: None
+
+    """
+
+    try:
+        # Wait til elements load into DOM
+        WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.ID, "startDate")))
+        WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.ID, "endDate")))
+
+        # Locate elements
+        start_input = driver.find_element(By.ID, "startDate")
+        end_input = driver.find_element(By.ID, "endDate")
+
+        # Clear and add new input
+        start_input.clear()
+        start_input.send_keys(start_date)
+        end_input.clear()
+        end_input.send_keys(end_date)
+        print(f"[ENMAP] Time set: {start_date} to {end_date}")
+    except Exception as e:
+        print("[ENMAP] set_time_range failed:", e)
+
+def set_bounding_box(driver, bbox):
+    """
+    Helper function to set the bounding box for EOWEB search. It uses the Advanced Map option in the portal to manually
+    set the bounding box
+
+    Args:
+        driver: selenium webdriver instance
+        bbox: bbox derived from locations
+
+    Returns: None
+
+    """
+
+    min_lon, min_lat, max_lon, max_lat = bbox
+
+    # 1. Show the advanced map
+    WebDriverWait(driver, 10).until(
+        EC.element_to_be_clickable((By.XPATH, "//button[contains(text(), 'Show Advanced Map')]"))
+    ).click()
+
+    # 2. Click the Bounding Box tab
+    WebDriverWait(driver, 10).until(
+        EC.element_to_be_clickable((By.XPATH, "//div[contains(text(), 'Bounding Box')]"))
+    ).click()
+
+    # 3. Fill in bounding box coordinates
+    WebDriverWait(driver, 10).until(
+        EC.presence_of_element_located((By.XPATH, "//input[contains(@name, 'Upper Latitude')]"))
+    )
+
+    # Clear and enter new information
+    driver.find_element(By.XPATH, "//input[contains(@name, 'Upper Latitude')]").clear()
+    driver.find_element(By.XPATH, "//input[contains(@name, 'Upper Latitude')]").send_keys(str(max_lat))
+
+    driver.find_element(By.XPATH, "//input[contains(@name, 'Lower Latitude')]").clear()
+    driver.find_element(By.XPATH, "//input[contains(@name, 'Lower Latitude')]").send_keys(str(min_lat))
+
+    driver.find_element(By.XPATH, "//input[contains(@name, 'Left Longitude')]").clear()
+    driver.find_element(By.XPATH, "//input[contains(@name, 'Left Longitude')]").send_keys(str(min_lon))
+
+    driver.find_element(By.XPATH, "//input[contains(@name, 'Right Longitude')]").clear()
+    driver.find_element(By.XPATH, "//input[contains(@name, 'Right Longitude')]").send_keys(str(max_lon))
+
+    print(f"[ENMAP] Bounding box set to: {bbox}")
+
+def select_enmap_collection(driver):
+    """
+    Selects the EnMAP collection in the filter panel.
+
+    Args:
+        driver: selenium webdriver instance
+
+    Returns: None
+
+    """
+
+    try:
+        checkbox = WebDriverWait(driver, 10).until(
+            EC.presence_of_element_located((By.XPATH, "//label[contains(text(), 'EnMAP')]//preceding-sibling::input[@type='checkbox']"))
+        )
+        if not checkbox.is_selected():
+            checkbox.click()
+            print("[ENMAP] Selected 'EnMAP-HSI (L0)' collection.")
+        else:
+            print("[ENMAP] Collection already selected.")
+    except Exception as e:
+        print("[ENMAP] Failed to select EnMAP collection:", e)
+
+def click_search(driver):
+    """
+    Clicks the Search button to run the product query.
+
+    Args:
+        driver: selenium webdriver instance
+
+    Returns: None
+
+    """
+
+    try:
+        # Wait and locate button
+        search_btn = WebDriverWait(driver, 10).until(
+            EC.element_to_be_clickable((By.XPATH, "//button[normalize-space()='Search']"))
+        )
+        # Click
+        search_btn.click()
+        print("[ENMAP] Search button clicked.")
+
+        # Optional: wait for results to appear
+        WebDriverWait(driver, 10).until(
+            EC.presence_of_element_located((By.CLASS_NAME, "resultTableRow"))  # adjust if needed
+        )
+        print("[ENMAP] Search results loaded.")
+    except Exception as e:
+        print("[ENMAP] Failed to click search or load results:", e)
+
+
+def prepare_enmap_search_page(driver):
+    try:
+        # Wait until the 'Clear Filters' button is visible — that's your stable anchor
+        WebDriverWait(driver, 20).until(
+            EC.element_to_be_clickable((By.XPATH, "//button[normalize-space()='Clear Filters']"))
+        )
+        print("[ENMAP] Search page loaded and filters visible.")
+    except Exception as e:
+        print("[ENMAP] Failed to prepare search page:", e)
+        raise
 
 def enmap_fire_query(amount=135, use_gcs=False):
     """
@@ -551,14 +696,54 @@ def enmap_fire_query(amount=135, use_gcs=False):
     """
 
     # Login
-    session = enmap_eoweb_login()
-    result = session.get("https://eoweb.dlr.de/egp/search")
-    print(result.text[:500])  # Check if logged in
+    driver = enmap_selenium_login()
+    #prepare_enmap_search_page(driver)
 
     # Load fire events and initialize
     progress_tracker = ProgressTracker()
     locations = create_locations(amount=amount, progress_tracker=progress_tracker)
     print(f"Will process {len(locations)} unprocessed locations")
+
+
+    for location in locations:
+        try:
+            print(f"[ENMAP] Processing {location.geohash}")
+
+            # Clear filters
+            try:
+                clear_btn = WebDriverWait(driver, 20).until(
+                    EC.element_to_be_clickable((By.XPATH, "//button[normalize-space()='Clear Filters']"))
+                )
+                clear_btn.click()
+                print("[ENMAP] Cleared previous filters.")
+            except Exception as e:
+                print(f"[ENMAP] Failed to clear filters: {e}")
+
+            try:
+                set_time_range(driver, location.time["from"], location.time["to"])
+            except Exception as e:
+                print(f"[ENMAP] set_time_range failed: {e}")
+
+            try:
+                set_bounding_box(driver, location.bbox["bbox"])
+            except Exception as e:
+                print(f"[ENMAP] set_bounding_box failed: {e}")
+
+            try:
+                select_enmap_collection(driver)
+            except Exception as e:
+                print(f"[ENMAP] select_enmap_collection failed: {e}")
+
+            try:
+                click_search(driver)
+            except Exception as e:
+                print(f"[ENMAP] click_search failed: {e}")
+
+            results = driver.find_elements(By.CLASS_NAME, "resultTableRow")
+            print(f"[ENMAP] Found {len(results)} results for {location.geohash}")
+
+        except Exception as e:
+            print(f"[ENMAP] Unhandled error for {location.geohash}: {e}")
 
 
 def batch_data_downloader_selenium(url=None, max_pages=9):
