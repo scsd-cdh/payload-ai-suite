@@ -59,8 +59,9 @@ def train(validate=False, epochs=12, use_nir=False, use_gcs=False):
             raise
     else:
         # Use local files
-        X, y = preprocess.populate(X, y, "../data/labeled/yes", use_nir=use_nir)
-        X, y = preprocess.populate(X, y, "../data/labeled/no", use_nir=use_nir, end=True)
+        data_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data")
+        X, y = preprocess.populate(X, y, os.path.join(data_dir, "labeled", "yes"), use_nir=use_nir)
+        X, y = preprocess.populate(X, y, os.path.join(data_dir, "labeled", "no"), use_nir=use_nir, end=True)
 
     # TODO: Use numpy instead here
     X = [X[i] for i in range(min(len(X), len(y)))]
