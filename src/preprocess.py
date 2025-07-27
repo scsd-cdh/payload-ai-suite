@@ -54,6 +54,7 @@ def populate(X_array, y_array, path, use_nir=False, end=False, gcs_handler=None)
                 else:
                     fused_result = rgb_nir_fusion(rgb)
                     rgb = dyn_zscore_normalize(rgb)
+                    X_array.append(rgb)
 
                 if not end:
                     y_array.append(image_path[0:1])
