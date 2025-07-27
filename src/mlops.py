@@ -334,12 +334,10 @@ def upload_labeled_to_gcs():
     cleanup_script = "clean_up_files.py"
     
     try:
-        # Run the cleanup script with 'yes' input to auto-confirm deletion using uv
+        # Run the cleanup script - it will prompt for confirmation
         result = subprocess.run(
             ["uv", "run", cleanup_script],
-            input="yes\n",
             text=True,
-            capture_output=True,
             cwd=os.path.dirname(__file__)
         )
         
