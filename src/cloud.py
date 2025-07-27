@@ -118,7 +118,7 @@ def test_onnx_inference(onnx_path, test_shape=(1, 3, 509, 509)):
     return ort_outputs[0]
 
 
-def test_on_labeled_images(onnx_path, data_dir="data/labeled", max_images=5):
+def test_on_labeled_images(onnx_path, data_dir="../data/labeled", max_images=5):
     """
     Test OmniCloudMask ONNX model on labeled wildfire images.
 
@@ -243,7 +243,7 @@ def main():
     """Main function to export OmniCloudMask models to ONNX."""
 
     # Define model paths
-    models_dir = Path("models/omnicloudmask")
+    models_dir = Path("../models/omnicloudmask")
 
     # Model configurations
     model_configs = [

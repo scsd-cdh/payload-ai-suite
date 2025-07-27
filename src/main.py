@@ -2,7 +2,7 @@
 """
 import argparse
 import model
-import cloud
+import cloud as cloud
 from fetch import (
     nasa_firms_api,
     setup_auth,
@@ -71,7 +71,7 @@ if __name__ == "__main__":
         import mlops
         mlops.run_multimodal_qc(use_gcs=args.use_gcs)
     elif args.process_sen2fire:
-        convert_sen2fire_labeled(root_dir="data/sen2fire", output_dir="data/labeled", use_nir=args.use_nir)
+        convert_sen2fire_labeled(root_dir="../data/sen2fire", output_dir="../data/labeled", use_nir=args.use_nir)
     elif args.cloud_mask:
 
         cloud.main()
