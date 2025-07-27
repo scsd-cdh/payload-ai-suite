@@ -16,6 +16,7 @@ import onnx
 import onnxruntime as ort
 import cv2
 from preprocess import dyn_zscore_normalize
+from paths import resolve_path
 
 def load_omnicloudmask_model(weights_path, model_name="regnety_004", device="cpu"):
     """
@@ -118,7 +119,7 @@ def test_onnx_inference(onnx_path, test_shape=(1, 3, 509, 509)):
     return ort_outputs[0]
 
 
-def test_on_labeled_images(onnx_path, data_dir="../data/labeled", max_images=5):
+def test_on_labeled_images(onnx_path, data_dir=None, max_images=5):
     """
     Test OmniCloudMask ONNX model on labeled wildfire images.
 
@@ -127,6 +128,8 @@ def test_on_labeled_images(onnx_path, data_dir="../data/labeled", max_images=5):
         data_dir: Base directory containing 'yes' and 'no' subdirectories
         max_images: Maximum number of images to test per category
     """
+    if data_dir is None:
+        data_dir = resolve_path("data/labeled")
     # Create ONNX runtime session
     ort_session = ort.InferenceSession(onnx_path)
 
@@ -243,7 +246,7 @@ def main():
     """Main function to export OmniCloudMask models to ONNX."""
 
     # Define model paths
-    models_dir = Path("../models/omnicloudmask")
+    models_dir = Path(resolve_path("models/omnicloudmask"))
 
     # Model configurations
     model_configs = [
