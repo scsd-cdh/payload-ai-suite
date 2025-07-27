@@ -32,7 +32,7 @@ class ProgressTracker:
     # Legacy workflow starts at event 125
     LEGACY_START_INDEX = 125
 
-    def __init__(self, filepath='progress_counter/eonet.json'):
+    def __init__(self, filepath='./progress_counter/eonet.json'):
         self.filepath = filepath
         self.progress = self._load_progress()
 
@@ -162,15 +162,15 @@ def retrieve_eonet_cross_reference():
     wildfire_url = "https://eonet.gsfc.nasa.gov/api/v3/categories/wildfires"
     response = requests.get(url=wildfire_url)
     data = response.json()
-    with open('../events/categories.json', 'w', encoding='utf-8') as f:
+    with open('./events/categories.json', 'w', encoding='utf-8') as f:
          json.dump(data, f, ensure_ascii=False, indent=4)
 
 
-def extract_eonet_coordinates(file_path='../events/categories.json'):
+def extract_eonet_coordinates(file_path='./events/categories.json'):
     """Extracts coordinates from the EONET categories JSON file.
 
     Args:
-        file_path (str): Path to the JSON file containing EONET wildfire events. Defaults to '../events/categories.json'.
+        file_path (str): Path to the JSON file containing EONET wildfire events. Defaults to './events/categories.json'.
 
     Returns:
         list: A list of coordinates in the format [[lon, lat], [lon, lat], ...].
@@ -196,7 +196,7 @@ def extract_eonet_coordinates(file_path='../events/categories.json'):
         print(f"Error extracting coordinates: {e}")
         return None
 
-def extract_time_ranges_from_eonet(file_path='../events/categories.json'):
+def extract_time_ranges_from_eonet(file_path='./events/categories.json'):
     """Extracts time ranges from the EONET categories JSON file and converts them to the required format.
 
     Args:
@@ -282,7 +282,7 @@ def write_image(response, metadata, location=None, use_gcs=False):
                 raise
         else:
             # Save locally
-            filename = f"../data/eonet_fire_events/{location.geohash}.{output_format}"
+            filename = f"./data/eonet_fire_events/{location.geohash}.{output_format}"
 
             # Write the response content data to a image file
             with open(filename, 'wb') as f:
