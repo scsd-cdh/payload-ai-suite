@@ -8,7 +8,7 @@ from fetch import (
     setup_auth,
     batch_data_downloader_selenium,
     retrieve_eonet_cross_reference,
-    copernicus_sentiel_query,
+    copernicus_query,
     convert_sen2fire_labeled
 )
 
@@ -25,7 +25,7 @@ if __name__ == "__main__":
         --setup-auth: Set up OAuth2 authentication for Copernicus.
         --batch-download: Download images using Selenium.
         --eonet-crossref: Fetch wildfire data from the EONET API.
-        --copernicus-query: Query Sentinel data from Copernicus.
+        --copernicus-query: Query remote satellite data from Copernicus.
         --coordinates: Specify coordinates for the query in the format: LON LAT.
         --time-range: Time range for the query in the format: FROM TO
                       (e.g., '2023-01-01T00:00:00Z 2023-01-03T23:59:59Z').
@@ -50,9 +50,11 @@ if __name__ == "__main__":
                         help="Time range for the query in the format: FROM TO (e.g., '2023-01-01T00:00:00Z 2023-01-03T23:59:59Z')")
     parser.add_argument('--use-nir', required=False, action='store_true', help="Enable 4-channel RGB-NIR input")
     parser.add_argument('--multimodal-qc', required=False, action='store_true', help="Run multimodal quality control check")
+    parser.add_argument('--qc-path', required=False, type=str, help="Path to folder for QC processing (e.g., 'sen2fire/to_qc' or 'eonet_fire_events/to_process')")
     parser.add_argument('--use-gcs', required=False, action='store_true', help="Stream training data from Google Cloud Storage")
-    parser.add_argument('--process-sen2fire', required=False, action='store_true', help="Convert Sen2Fire dataset instead of labeled/yes and no.")
+    parser.add_argument('--process-sen2fire', required=False, action='store_true', help="Convert Sen2Fire dataset to a state to be processed by the pipeline.")
     parser.add_argument('--cloud-mask', required=False, action='store_true', help="Export OmniCloudMask models to ONNX and test on labeled data")
+    parser.add_argument('--upload-labeled', required=False, action='store_true', help="Upload labeled data to GCS after running cleanup")
 
     args = parser.parse_args()
     if args.run_model:
@@ -66,14 +68,16 @@ if __name__ == "__main__":
     elif args.eonet_crossref:
         retrieve_eonet_cross_reference()
     elif args.copernicus_query:
-        copernicus_sentiel_query(use_gcs=args.use_gcs)
+        copernicus_query(use_gcs=args.use_gcs)
     elif args.multimodal_qc:
         import mlops
-        mlops.run_multimodal_qc(use_gcs=args.use_gcs)
+        mlops.run_multimodal_qc(use_gcs=args.use_gcs, input_path=args.qc_path)
     elif args.process_sen2fire:
-        convert_sen2fire_labeled(root_dir="../data/sen2fire", output_dir="../data/labeled", use_nir=args.use_nir)
+        convert_sen2fire_labeled(use_nir=args.use_nir)
     elif args.cloud_mask:
-
         cloud.main()
+    elif args.upload_labeled:
+        import mlops
+        mlops.upload_labeled_to_gcs()
     else:
         print("No valid arguments provided. Use -h for help.")

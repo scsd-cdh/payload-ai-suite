@@ -48,10 +48,11 @@ def populate(X_array, y_array, path, use_nir=False, end=False, gcs_handler=None)
                     nir = np.expand_dims(nir, axis=-1)
                     # Shape (224, 224, 4)
                     rgb_nir = np.concatenate((rgb, nir), axis=-1)
+                    logger.debug(f"NIR processing - RGB shape: {rgb.shape}, NIR shape: {nir.shape}, Combined: {rgb_nir.shape}")
                     rgb_nir = dyn_zscore_normalize(rgb_nir)
                     X_array.append(rgb_nir)
                 else:
-                    fused_result = rgb_nir_fusion(rgb, mode=)
+                    fused_result = rgb_nir_fusion(rgb)
                     rgb = dyn_zscore_normalize(rgb)
 
                 if not end:
@@ -73,13 +74,14 @@ def populate(X_array, y_array, path, use_nir=False, end=False, gcs_handler=None)
                     nir = np.expand_dims(nir, axis=-1)
                     # Shape (224, 224, 4)
                     rgb_nir = np.concatenate((rgb, nir), axis=-1)
+                    logger.debug(f"NIR processing - RGB shape: {rgb.shape}, NIR shape: {nir.shape}, Combined: {rgb_nir.shape}")
                     rgb_nir = dyn_zscore_normalize(rgb_nir)
-                    X_array.append(fused_result)
+                    X_array.append(rgb_nir)
                 else:
                     # RGB NIR fusion algorthm still relevant if we have 4 channels
                     # the `use_nir` flag is soely for the AI model to take in a 4 channel input tensor
                     # TODO: figure out order of dyn_z_score normalize and rgb fusion
-                    fused_result = rgb_nir_fusion(rgb, mode=)
+                    fused_result = rgb_nir_fusion(rgb)
                     rgb = dyn_zscore_normalize(rgb)
 
                     X_array.append(fused_result)
@@ -175,4 +177,4 @@ def rgb_nir_fusion(image_data: np.ndarray[Any, np.dtype[np.integer[Any] | np.flo
     """
 
 
-    pass
+    return image_data
