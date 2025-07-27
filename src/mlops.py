@@ -9,6 +9,7 @@ from typing import List, Optional
 
 from google import genai
 from google.cloud import storage
+from paths import get_gcs_credentials_path, resolve_path
 
 # Uncomment to load environment variables from .env file
 # from dotenv import load_dotenv
@@ -31,7 +32,7 @@ class GCSHandler:
         # Use environment variables for configuration
         self.bucket_name = os.getenv('GCS_BUCKET_NAME')
         self.project_id = os.getenv('GCS_PROJECT_ID')
-        self.credentials_path = os.getenv('GOOGLE_APPLICATION_CREDENTIALS')
+        self.credentials_path = os.getenv('GOOGLE_APPLICATION_CREDENTIALS', get_gcs_credentials_path())
 
         # Set up logging
         self.logger = logging.getLogger(__name__)
@@ -190,9 +191,9 @@ def multimodal_qc(file_input, file_name=None, use_gcs=False, gcs_handler=None):
 
     # Determine output path
     if binary_output == "fire":
-        output_path = "labeled/yes" if use_gcs else "../data/labeled/yes"
+        output_path = "labeled/yes" if use_gcs else resolve_path("data/labeled/yes")
     else:
-        output_path = "labeled/no" if use_gcs else "../data/labeled/no"
+        output_path = "labeled/no" if use_gcs else resolve_path("data/labeled/no")
 
     # Save to appropriate location
     if use_gcs and gcs_handler:
@@ -229,7 +230,7 @@ def multimodal_qc(file_input, file_name=None, use_gcs=False, gcs_handler=None):
 
     return binary_output
 
-def run_multimodal_qc(use_gcs=False):
+def run_multimodal_qc(use_gcs=False, input_path=None):
     """Orchestrates the multimodal quality control process for a batch of images.
 
     This function identifies image files either locally or in GCS and processes
@@ -237,6 +238,8 @@ def run_multimodal_qc(use_gcs=False):
 
     Args:
         use_gcs: Whether to use Google Cloud Storage for reading/writing files.
+        input_path: Path to the folder containing images to process. 
+                   Defaults to 'eonet_fire_events/to_process' if not specified.
     """
     if use_gcs:
         # Initialize GCS handler
@@ -283,13 +286,20 @@ def run_multimodal_qc(use_gcs=False):
 
     if not use_gcs:
         # Standard local file processing
-        image_files = glob.glob("../data/eonet_fire_events/to_process/*")
+        if input_path:
+            # Use provided path
+            base_path = resolve_path(f"data/{input_path}")
+        else:
+            # Default to eonet path
+            base_path = resolve_path("data/eonet_fire_events/to_process")
+        
+        image_files = glob.glob(f"{base_path}/*")
 
         if not image_files:
-            print("No images found locally in ../data/eonet_fire_events/to_process/")
+            print(f"No images found locally in {base_path}")
             return
 
-        print(f"Found {len(image_files)} images locally to process")
+        print(f"Found {len(image_files)} images locally to process in {base_path}")
 
         # Process each file from local directory
         if GEMINI_AVAILABLE:
@@ -301,3 +311,127 @@ def run_multimodal_qc(use_gcs=False):
                     continue
         else:
             print(f"Multimodal qc not available. Genai client not set")
+
+
+def upload_labeled_to_gcs():
+    """Upload local labeled data to Google Cloud Storage after cleaning up files.
+    
+    This function:
+    1. Runs the clean_up_files.py script to remove duplicates and empty files
+    2. Uploads all files from ../data/labeled/yes and ../data/labeled/no to GCS
+    3. Uses cloud directory structure: labeled/yes and labeled/no
+    """
+    import subprocess
+    import os
+    import glob
+    
+    print("=" * 80)
+    print("Starting labeled data upload to GCS")
+    print("=" * 80)
+    
+    # Step 1: Run cleanup script using uv
+    print("\nStep 1: Running clean_up_files.py to remove duplicates and empty files...")
+    cleanup_script = "clean_up_files.py"
+    
+    try:
+        # Run the cleanup script with 'yes' input to auto-confirm deletion using uv
+        result = subprocess.run(
+            ["uv", "run", cleanup_script],
+            input="yes\n",
+            text=True,
+            capture_output=True,
+            cwd=os.path.dirname(__file__)
+        )
+        
+        if result.returncode == 0:
+            print("Cleanup completed successfully!")
+            print(result.stdout)
+        else:
+            print(f"Warning: Cleanup script returned non-zero exit code: {result.returncode}")
+            print("Error output:", result.stderr)
+            response = input("\nDo you want to continue with upload anyway? (yes/no): ").strip().lower()
+            if response != 'yes':
+                print("Upload cancelled.")
+                return
+    except Exception as e:
+        print(f"Error running cleanup script: {e}")
+        response = input("\nDo you want to continue with upload anyway? (yes/no): ").strip().lower()
+        if response != 'yes':
+            print("Upload cancelled.")
+            return
+    
+    # Step 2: Initialize GCS handler
+    print("\nStep 2: Initializing Google Cloud Storage connection...")
+    try:
+        gcs_handler = GCSHandler()
+    except Exception as e:
+        print(f"Failed to initialize GCS handler: {e}")
+        print("Make sure GCS environment variables are set correctly.")
+        return
+    
+    # Step 3: Upload files
+    print("\nStep 3: Uploading labeled data to GCS...")
+    
+    labels = ["yes", "no"]
+    total_uploaded = 0
+    failed_uploads = []
+    
+    for label in labels:
+        local_path = resolve_path(f"data/labeled/{label}")
+        # Cloud structure is different - no 'data' prefix
+        gcs_base_path = f"labeled/{label}"
+        
+        # Find all files in the directory
+        pattern = os.path.join(local_path, "*")
+        files = glob.glob(pattern)
+        
+        print(f"\nUploading {len(files)} files from {local_path} to gs://{gcs_handler.bucket_name}/{gcs_base_path}/")
+        
+        for file_path in files:
+            if os.path.isfile(file_path):
+                filename = os.path.basename(file_path)
+                gcs_path = f"{gcs_base_path}/{filename}"
+                
+                try:
+                    with open(file_path, 'rb') as f:
+                        data = f.read()
+                    
+                    # Determine content type based on file extension
+                    ext = os.path.splitext(filename)[1].lower()
+                    content_type = {
+                        '.png': 'image/png',
+                        '.jpg': 'image/jpeg',
+                        '.jpeg': 'image/jpeg',
+                        '.tiff': 'image/tiff',
+                        '.tif': 'image/tiff'
+                    }.get(ext, 'application/octet-stream')
+                    
+                    success = gcs_handler.upload_bytes(data, gcs_path, content_type=content_type)
+                    
+                    if success:
+                        total_uploaded += 1
+                        if total_uploaded % 50 == 0:  # Progress indicator every 50 files
+                            print(f"  Progress: {total_uploaded} files uploaded...")
+                    else:
+                        failed_uploads.append(file_path)
+                        
+                except Exception as e:
+                    print(f"  Error uploading {filename}: {e}")
+                    failed_uploads.append(file_path)
+    
+    # Step 4: Summary
+    print("\n" + "=" * 80)
+    print("Upload Summary:")
+    print(f"- Total files uploaded: {total_uploaded}")
+    print(f"- Failed uploads: {len(failed_uploads)}")
+    
+    if failed_uploads:
+        print("\nFailed files:")
+        for f in failed_uploads[:10]:  # Show first 10
+            print(f"  - {f}")
+        if len(failed_uploads) > 10:
+            print(f"  ... and {len(failed_uploads) - 10} more")
+    
+    print("\nUpload complete!")
+    print(f"Data is now available at: gs://{gcs_handler.bucket_name}/labeled/")
+    print("=" * 80)
