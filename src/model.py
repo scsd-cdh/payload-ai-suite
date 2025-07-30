@@ -24,11 +24,12 @@ from sklearn.model_selection import train_test_split
 import matplotlib.pyplot as plt
 import logging
 from mlops import GCSHandler
+from paths import resolve_path, get_model_path
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-def train(validate=False, epochs=12, use_nir=False, use_gcs=False):
+def train(validate=True, epochs=12, use_nir=False, use_gcs=False):
     """
     Train CNN VGG model on labeled data.
 
@@ -59,9 +60,8 @@ def train(validate=False, epochs=12, use_nir=False, use_gcs=False):
             raise
     else:
         # Use local files
-        data_dir = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "data")
-        X, y = preprocess.populate(X, y, os.path.join(data_dir, "labeled", "yes"), use_nir=use_nir)
-        X, y = preprocess.populate(X, y, os.path.join(data_dir, "labeled", "no"), use_nir=use_nir, end=True)
+        X, y = preprocess.populate(X, y, resolve_path("data/labeled/yes"), use_nir=use_nir)
+        X, y = preprocess.populate(X, y, resolve_path("data/labeled/no"), use_nir=use_nir, end=True)
 
     # TODO: Use numpy instead here
     X = [X[i] for i in range(min(len(X), len(y)))]
@@ -147,7 +147,7 @@ def train(validate=False, epochs=12, use_nir=False, use_gcs=False):
     val_accuracy = history.history['val_accuracy']
     loss = history.history['loss']
     val_loss = history.history['val_loss']
-    # export_to_onnx(model)
+    export_to_onnx(model)
 
     if validate:
         test_loss, test_accuracy = model.evaluate(X_test, y_test)
@@ -182,9 +182,11 @@ def export_to_onnx(model):
         input_signature=input_signature,
         opset=13  # Specify ONNX opset version
     )
-    onnx.save(onnx_model, '../zetane.onnx')
+    onnx.save(onnx_model, get_model_path('zetane.onnx'))
 
-def run_inference(onnx_model="../zetane.onnx", data_target=None):
+def run_inference(onnx_model=None, data_target=None):
+    if onnx_model is None:
+        onnx_model = get_model_path('zetane.onnx')
     if not data_target.any():
         print("Please provide a test target")
         return

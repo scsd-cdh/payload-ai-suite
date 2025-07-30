@@ -9,6 +9,7 @@ import time
 import os
 from mlops import GCSHandler
 from datetime import datetime
+from paths import resolve_path
 
 
 from oauthlib.oauth2 import BackendApplicationClient
@@ -329,9 +330,9 @@ class Location:
         return geohash
 
 def create_locations(amount=135, progress_tracker=None):
-    """Creates a list of Location objects based on EONET data.
+    """Creates a list of Location objects based on data in event directory.
 
-    This function extracts time ranges and coordinates from the EONET wildfire data
+    This function extracts time ranges and coordinates from the EONET wildfire data and future FIRMS database
     and uses them to create Location objects, starting from the last processed entry
     if a progress tracker is provided.
 
@@ -344,6 +345,7 @@ def create_locations(amount=135, progress_tracker=None):
     """
     # list of dict entries in the form {'from': '2023-08-05T17:59:00Z', 'to': '2023-08-07T17:59:00Z'}
     locations = []
+
     time_ranges = extract_time_ranges_from_eonet()
     coordinates = extract_eonet_coordinates()
 
@@ -394,7 +396,7 @@ def validate_query(target, auth):
     response = requests.post(url, json=data, headers=auth)
     print(response.content)
 
-def copernicus_sentiel_query(use_gcs=False, amount=135):
+def copernicus_query(use_gcs=False, amount=135):
     """Queries Sentinel-2 and Sentinel-1 data from the Copernicus Data Space Ecosystem.
 
     This function uses an inline evaluation script to process Sentinel-2 bands of interest
@@ -428,6 +430,7 @@ def copernicus_sentiel_query(use_gcs=False, amount=135):
 
     # Example code how to query copernicus sentiel 2 data and do explcit image processing evals with inline script.
     # Currently reading from the eo_net wildfire json file.
+
 
     sensor = "sentinel-2-l2a"
 
@@ -545,7 +548,7 @@ def batch_data_downloader_selenium(url=None, max_pages=9):
     return downloaded
 
 
-def convert_sen2fire_labeled(root_dir="../data/sen2fire", output_dir="../data/labeled",  use_nir=False):
+def convert_sen2fire_labeled(root_dir=None, output_dir=None, use_nir=False):
     """
     Based on:
     Xu, Y., Berg, A., & Haglund, L. (2024).
@@ -558,6 +561,10 @@ def convert_sen2fire_labeled(root_dir="../data/sen2fire", output_dir="../data/la
         root_dir (str): Path to Sen2Fire dataset
         output_dir (str): Path to labeled data folder
     """
+    if root_dir is None:
+        root_dir = resolve_path("data/sen2fire")
+    if output_dir is None:
+        output_dir = resolve_path("data/labeled")
     #TODO: to access the npz files -> url:https://zenodo.org/records/10881058
     scenes = {
         # for training
@@ -573,7 +580,17 @@ def convert_sen2fire_labeled(root_dir="../data/sen2fire", output_dir="../data/la
 
     for scene, label in scenes.items():
         scene_path = os.path.join(root_dir, scene)
-        npz_files = [f for f in os.listdir(scene_path) if f.endswith(".npz")] # collect all the .npz files in the folder
+        
+        # Check if scene directory exists
+        if not os.path.exists(scene_path):
+            logger.warning(f"Scene directory not found: {scene_path}")
+            continue
+            
+        try:
+            npz_files = [f for f in os.listdir(scene_path) if f.endswith(".npz")] # collect all the .npz files in the folder
+        except Exception as e:
+            logger.error(f"Error listing files in {scene_path}: {e}")
+            continue
 
         for fname in npz_files:
             fpath = os.path.join(scene_path, fname)
@@ -581,11 +598,14 @@ def convert_sen2fire_labeled(root_dir="../data/sen2fire", output_dir="../data/la
                 data = np.load(fpath) # loading the data
                 img = data["image"]  # shape: (12, H, W) -- 13 bands with 512 x 512 patches
                 mask = data["label"]  # shape: (H, W)
+                
+                logger.debug(f"Processing {fname}: image shape {img.shape}, mask shape {mask.shape}")
 
                 # if fire is present if the pixel is 1
                 fire_present = int(np.any(mask)) # collection of fire data
                 # override if fire is actually present
                 final_label = "yes" if fire_present else "no"
+                logger.debug(f"Fire present in {fname}: {fire_present} -> label: {final_label}")
 
                 # Extract RGB
                 channels = [3, 2, 1]
@@ -595,22 +615,30 @@ def convert_sen2fire_labeled(root_dir="../data/sen2fire", output_dir="../data/la
 
                 if use_nir: # NIR Band
                     channels.append(7) # B8 - NIR (7)
+                    logger.debug(f"Using NIR - channels: {channels}")
 
-                img_crop = img[channels, :, :]  # shape: (512, 512, 3 or 4)
+                img_crop = img[channels, :, :]  # shape: (3 or 4, 512, 512)
+                logger.debug(f"After channel extraction: shape {img_crop.shape}")
 
                 #shapes of the images should be formatted with 512 x 512 height
-                img_crop = np.transpose(img_crop, (1, 2, 0))
+                img_crop = np.transpose(img_crop, (1, 2, 0))  # shape: (512, 512, 3 or 4)
+                logger.debug(f"After transpose: shape {img_crop.shape}")
 
                 #checking for correct height and width
                 assert img_crop.shape[0] == 512 and img_crop.shape[1] == 512, \
                     f"Unexpected image shape: {img_crop.shape}"# error
 
                 # Normalize to 0–255 for transferring into numpy img
+                img_min, img_max = img_crop.min(), img_crop.max()
+                logger.debug(f"Image value range before normalization: min={img_min}, max={img_max}")
+                
                 img_norm = (img_crop / img_crop.max()) * 255 # img content comes from img_norm array
                 img_norm = img_norm.astype(np.uint8) # image pixel values
+                logger.debug(f"After normalization: min={img_norm.min()}, max={img_norm.max()}")
 
                 out_file = os.path.join(output_dir, final_label, f"{scene}_{fname.replace('.npz', '.png')}") # goes into the dataset based on yes or no
                 Image.fromarray(img_norm).save(out_file) # saves as a real PNG file
+                logger.info(f"Saved: {out_file}")
 
             except Exception as e: # logging errors
                 logger.warning(f"Failed to process {fpath}: {e}")
