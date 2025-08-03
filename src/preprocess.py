@@ -173,9 +173,48 @@ def dyn_zscore_normalize(img: np.ndarray, no_data_value: float = 0.0) -> np.ndar
     logger.debug(f"Z-score normalization complete - Output shape: {normal_img.shape}")
     return normal_img # should return image with the same shape that was given by the input
 
-def rgb_nir_fusion(image_data: np.ndarray[Any, np.dtype[np.integer[Any] | np.floating[Any]]]):
+def rgb_nir_fusion(image_data: np.ndarray[Any, np.dtype[np.integer[Any] | np.floating[Any]]],
+                   use_enhanced_red: bool = False, use_hsv_fusion: bool = False):
     """
+    Use nir band to "enhance" RGB image. Data fusion technique borrowed from robotics computer vision
+
+    Two flag options:
+
+    1. enhanced red
+    alpha = 0.5
+    enhanced_red = (1 - alpha) * red + alpha * nir
+    fused = np.stack([enhanced_red, green, blue], axis=-1)
+
+    2. We can try convert the image to a diferent colorspace (RGB -> HSV)
+    and then we combine the brightness channel (V) with the NIR image.
+    We fuse it back together using the inverse of RGB -> HSV matrix. Hue and saturation remain untouched.
     """
+    logger.info(f"RGB-NIR fusion called with shape: {image_data.shape}")
 
+    # Extract RGB and NIR from 4-channel input
+    rgb = image_data[:, :, :3]
+    nir = image_data[:, :, 3]
 
-    return image_data
+    if use_enhanced_red:
+        logger.info("Using enhanced red fusion method")
+        blue, green, red = cv2.split(rgb)
+        alpha = 0.5
+        enhanced_red = (1 - alpha) * red + alpha * nir
+        fused = np.stack([blue, green, enhanced_red], axis=-1)
+        logger.debug(f"Enhanced red fusion complete - output shape: {fused.shape}")
+        return fused
+
+    elif use_hsv_fusion:
+        logger.info("Using HSV fusion method")
+        hsv = cv2.cvtColor(rgb, cv2.COLOR_BGR2HSV)
+        h, s, v = cv2.split(hsv)
+        # Combine V channel with NIR
+        enhanced_v = (v + nir) / 2
+        fused_hsv = cv2.merge([h, s, enhanced_v])
+        fused = cv2.cvtColor(fused_hsv, cv2.COLOR_HSV2BGR)
+        logger.debug(f"HSV fusion complete - output shape: {fused.shape}")
+        return fused
+
+    else:
+        logger.info("No fusion method specified, returning RGB channels only")
+        return rgb
