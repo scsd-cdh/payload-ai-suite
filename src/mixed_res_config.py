@@ -17,7 +17,9 @@ LIGHT_MIXED_RES_CONFIG = {
     'use_multi_resolution': False,
     'use_resolution_mixup': False,
     'min_scale': 0.8,
-    'max_scale': 1.2
+    'max_scale': 1.2,
+    'resolution_scales': [0.8, 1.0, 1.2],
+    'mixup_alpha': 0.1
 }
 
 # Configuration for heavy augmentation

@@ -1,5 +1,4 @@
-""" nofil
-All image preprocessing logic and algorithms should go here
+"""All image preprocessing logic and algorithms should go here
 
 Features
 - Handles both 3-channel (RGB) and 4-channel (RGB+NIR from TIFF alpha)
@@ -12,6 +11,7 @@ import numpy as np
 import random
 import logging
 from typing import Optional, List, Tuple, Union
+from src.mixed_res_config import DEFAULT_MIXED_RES_CONFIG
 
 # Set up logging
 logger = logging.getLogger(__name__)
@@ -47,13 +47,19 @@ def random_resize_with_pad(image: np.ndarray, min_scale: float = 0.5, max_scale:
     logger.debug(f"Resizing with scale {scale:.2f} to dimensions {new_width}x{new_height}")
     
     # If the scale would produce an image too large, cap it to the original size
+    # This is done to prevent issues with padding calculations
     if new_height > original_height:
         new_height = original_height
     if new_width > original_width:
         new_width = original_width
+    
+    # Choose appropriate interpolation method based on scale
+    # INTER_AREA is recommended for downsampling to avoid aliasing
+    # INTER_LINEAR is better for upsampling
+    interpolation = cv2.INTER_AREA if scale < 1.0 else cv2.INTER_LINEAR
         
-    # Resize image
-    resized_image = cv2.resize(image, (new_width, new_height), interpolation=cv2.INTER_LINEAR)
+    # Resize image with proper interpolation
+    resized_image = cv2.resize(image, (new_width, new_height), interpolation=interpolation)
     
     # Create canvas with original dimensions
     if len(image.shape) == 3:
@@ -82,10 +88,13 @@ def random_resize_with_pad(image: np.ndarray, min_scale: float = 0.5, max_scale:
     logger.debug(f"Completed random_resize_with_pad - Output shape: {canvas.shape}")
     return canvas
 
+
 def multi_resolution_batch(images: List[np.ndarray], resolution_scales: List[float] = None) -> List[np.ndarray]:
     """
     Apply different resolutions to a batch of images.
     Each image in the batch gets a randomly selected resolution scale.
+    This helps train models to be resolution-agnostic by simulating 
+    imagery captured at different resolutions.
     
     Args:
         images: List of input images
@@ -139,10 +148,12 @@ def multi_resolution_batch(images: List[np.ndarray], resolution_scales: List[flo
 def resolution_mixup(image: np.ndarray, alpha: float = 0.2) -> np.ndarray:
     """
     Apply mixup between different resolution versions of the same image.
+    This is based on the mixup data augmentation technique (Zhang et al., 2017),
+    but applied to resolution variations instead of class labels.
     
     Args:
         image: Input image
-        alpha: Mixing weight for the low-resolution version
+        alpha: Mixing weight parameter (controls randomness of mix ratio)
         
     Returns:
         Mixed resolution image
@@ -166,15 +177,11 @@ def resolution_mixup(image: np.ndarray, alpha: float = 0.2) -> np.ndarray:
     downsampled = cv2.resize(image, (down_width, down_height), interpolation=cv2.INTER_AREA)
     low_res = cv2.resize(downsampled, (width, height), interpolation=cv2.INTER_LINEAR)
     
-    # Generate mixing weight
+    # Generate mixing weight from beta distribution or simplified random
     mix_ratio = alpha + random.random() * (1.0 - alpha)
     
-    # Mix original and low-resolution images
-    mixed_image = mix_ratio * image + (1.0 - mix_ratio) * low_res
-    
-    # Convert back to original data type if needed
-    if np.issubdtype(image.dtype, np.integer):
-        mixed_image = np.clip(mixed_image, 0, 255).astype(image.dtype)
+    # Mix original and low-resolution images using cv2.addWeighted for better performance
+    mixed_image = cv2.addWeighted(image, mix_ratio, low_res, 1.0 - mix_ratio, 0)
     
     logger.debug(f"Completed resolution_mixup with down_factor={down_factor:.2f}, mix_ratio={mix_ratio:.2f}")
     return mixed_image
@@ -197,10 +204,12 @@ def apply_mixed_resolution_ops(images: List[np.ndarray],
         
     Returns:
         List of processed images
+    
+    Note: This function makes a copy of the list but modifies images in-place.
     """
     logger.debug(f"Starting apply_mixed_resolution_ops on {len(images)} images")
     
-    processed_images = images.copy()
+    processed_images = images.copy()  # Makes a copy of the list, but not the images themselves
     
     if use_random_resize:
         min_scale = kwargs.get('min_scale', 0.5)
@@ -238,17 +247,8 @@ def populate(X_array, y_array, path, use_nir=False, end=False, gcs_handler=None,
     """
     # Default configuration for mixed resolution operations
     if use_mixed_res and mixed_res_config is None:
-        mixed_res_config = {
-            'use_random_resize': True,
-            'use_multi_resolution': True,
-            'use_resolution_mixup': True,
-            'min_scale': 0.5,
-            'max_scale': 1.5,
-            'resolution_scales': [0.5, 0.75, 1.0, 1.25, 1.5],
-            'mixup_alpha': 0.2
-        }
+        mixed_res_config = DEFAULT_MIXED_RES_CONFIG
     
-    # Original populate code
     try:
         if gcs_handler:
             # Stream from GCS
@@ -263,7 +263,12 @@ def populate(X_array, y_array, path, use_nir=False, end=False, gcs_handler=None,
                     print(f"Could not decode {image_path}, skipping...")
                     continue
 
-                rgb = cv2.resize(rgb, (224, 224))
+                # IMPORTANT: Apply mixed resolution operations BEFORE resizing to fixed size
+                if use_mixed_res:
+                    rgb = apply_mixed_resolution_ops([rgb], **mixed_res_config)[0]
+                
+                # AFTER augmentation, resize to fixed size for the model
+                rgb = cv2.resize(rgb, (224, 224), interpolation=cv2.INTER_AREA)
 
                 if use_nir:
                     nir = cv2.cvtColor(rgb, cv2.COLOR_BGR2GRAY)
@@ -282,13 +287,23 @@ def populate(X_array, y_array, path, use_nir=False, end=False, gcs_handler=None,
         else:
             # Local files
             for image in os.listdir(path):
+                # Skip Windows metadata files
+                if image.endswith(':Zone.Identifier'):
+                    continue
+                    
                 image_path = os.path.join(path, image)
-
                 rgb = cv2.imread(image_path)
+                
                 if rgb is None:
                     print(f"Could not read {image_path}, skipping...")
                     continue
-                rgb = cv2.resize(rgb, (224, 224))
+                    
+                # IMPORTANT: Apply mixed resolution operations BEFORE resizing to fixed size
+                if use_mixed_res:
+                    rgb = apply_mixed_resolution_ops([rgb], **mixed_res_config)[0]
+                
+                # AFTER augmentation, resize to fixed size for the model
+                rgb = cv2.resize(rgb, (224, 224), interpolation=cv2.INTER_AREA)
 
                 if use_nir:
                     nir = cv2.cvtColor(rgb, cv2.COLOR_BGR2GRAY)
@@ -310,15 +325,13 @@ def populate(X_array, y_array, path, use_nir=False, end=False, gcs_handler=None,
             while len(y_array) < len(X_array):
                 y_array.append("N")
                 
-        # Apply mixed resolution operations if requested
-        if use_mixed_res and X_array:  # Make sure X_array is not empty
-            logger.info(f"Applying mixed resolution operations to {len(X_array)} images")
-            X_array = apply_mixed_resolution_ops(X_array, **mixed_res_config)
-            
     except cv2.error as e:
         print(f"CV2 error in preprocess: {e}")
         raise e
 
+    # Log data loaded
+    logger.info(f"Loaded {len(X_array)} images from {path}")
+    
     return X_array, y_array
 
 
@@ -395,3 +408,36 @@ def dyn_zscore_normalize(img: np.ndarray, no_data_value: float = 0.0) -> np.ndar
 
     logger.debug(f"Z-score normalization complete - Output shape: {normal_img.shape}")
     return normal_img # should return image with the same shape that was given by the input
+
+
+def clean_zone_identifiers(data_dir='data'):
+    """
+    Removes Windows Zone.Identifier files from the data directory.
+    This is useful to run once to clean up the dataset.
+    
+    Args:
+        data_dir: Base directory containing image data
+    """
+    import glob
+    
+    # Find all Zone.Identifier files
+    zone_files = glob.glob(f'{data_dir}/**/*:Zone.Identifier', recursive=True)
+    
+    if zone_files:
+        logger.info(f"Found {len(zone_files)} Zone.Identifier files to clean")
+        
+        for file in zone_files:
+            try:
+                # Get the original filename without the Zone.Identifier suffix
+                original_file = file.split(':Zone.Identifier')[0]
+                
+                # Remove the Zone.Identifier file
+                os.remove(file)
+                logger.debug(f"Removed {file}")
+                
+            except Exception as e:
+                logger.error(f"Failed to clean {file}: {str(e)}")
+        
+        logger.info(f"Cleaned {len(zone_files)} Zone.Identifier files")
+    else:
+        logger.info("No Zone.Identifier files found to clean")
