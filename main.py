@@ -4,6 +4,7 @@ import argparse
 import model
 import mlops
 import cloud
+import postprocess
 from fetch import (
     nasa_firms_api,
     setup_auth,
@@ -52,6 +53,7 @@ if __name__ == "__main__":
     parser.add_argument('--multimodal-qc', required=False, action='store_true', help="Run multimodal quality control check")
     parser.add_argument('--use-gcs', required=False, action='store_true', help="Stream training data from Google Cloud Storage")
     parser.add_argument('--cloud-mask', required=False, action='store_true', help="Export OmniCloudMask models to ONNX and test on labeled data")
+    parser.add_argument('--convert-image', required=False, action='store_true', help="Convert bayer images to AVIF format")
 
     args = parser.parse_args()
     if args.run_model:
@@ -70,6 +72,8 @@ if __name__ == "__main__":
         mlops.run_multimodal_qc(use_gcs=args.use_gcs)
     elif args.cloud_mask:
         cloud.main()
+    elif args.convert_image:
+        postprocess.conversion()
     else:
         print("No valid arguments provided. Use -h for help.")
 
