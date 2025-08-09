@@ -283,4 +283,4 @@ def test_ccds():
         print(f"  Original size: {rgb.size} bytes")
         print(f"  Compressed size: {len(compressed)} bytes")
 
-test_ccds_color()
+test_ccds()
