@@ -4,9 +4,10 @@ Collection of software tools for multispectral image analysis and model testing.
 # Features
 - Cross-reference FIRMS fire event/EoNet and query via Copernicus's process API.
 - Run VGG model on labeled (fire/no fire) data.
-- Preprocess RGB-NIR algorithm
+- Preprocess RGB-NIR algorithm with advanced fusion techniques
 - Optional NIR channel support for RGB-NIR 4 channel tensor model.
 - Cloud mask preprocessing to check cloud coverage threshold before wildfire inference.
+- Image compression for satellite downlinking (AVIF and CCDS formats)
 
 # Mission Goals
 The underlying goal of this project is to illustrate the use of an embedded AI classification model for onboard wildfire detection. The inference provided by the model enables us to discard erroneous images and selectively downlink only successful captures.
@@ -20,6 +21,15 @@ Our operational goal is to detect medium fires (10-1,000 acres). These events re
 For effective wildfire detection, we are using a multispectral RGB-NIR camera from Spectral Devices. This choice is based on the fact that the visible light spectrum (i.e., RGB) shares the same limitations as the human visual system when directly detecting fires. Incidental smoke severely limits the visual contrast of active flames, and fire emits far more energy in the IR spectrum.
 
 It has been shown that NIR wavelengths between 830 nm and 1000 nm, captured by COTS camera sensors, provide statistically significant advantages in fire detection. As commonly employed in the field of robotics, our thesis is that the accuracy of our model will increase with an RGB-NIR fusion image as an input to improve feature detection.
+
+## RGB-NIR Fusion Techniques
+The preprocessing pipeline now includes two advanced fusion methods to combine RGB and NIR data:
+
+1. **Enhanced Red Fusion**: Blends the NIR channel with the red channel using a weighted average (α=0.5), enhancing fire-related features while maintaining color balance.
+
+2. **HSV Fusion**: Converts RGB to HSV color space and combines the NIR channel with the brightness (V) channel, preserving hue and saturation while enhancing intensity information.
+
+These fusion techniques reduce the 4-channel input to 3 channels while retaining critical NIR information for improved fire detection.
 
 If the `--use-nir` flag is used, preprocessing will maintain the additional NIR channel for R&D purposes. Currently, this NIR data can be found in the alpha channel of the test data. In production, the input would be the raw bayer output of the multispectral camera.
 
