@@ -253,7 +253,7 @@ def rgb_compression(image_rgb: NDArray[np.uint8], config: Optional[CCDSConfig] =
 
     return compressed
 
-def test_ccds_color():
+def test_ccds():
     """
     Test CCDS compression in color
     """
