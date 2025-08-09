@@ -47,7 +47,6 @@ import pywt
 import rawpy
 import numpy as np
 from PIL import Image
-from skimage.color import rgb2ycbcr
 
 class AVIFConfig(BaseModel):
     """Configuration for AVIF encoding."""
@@ -231,35 +230,37 @@ def test_ccds():
     print(f"Compressed size: {len(compressed)} bytes")
     print(f"First 64 bytes of compressed data: {compressed[:64]}")
 
-def ycbr_conversion(image_rgb: NDArray[np.uint8], config: Optional[CCDSConfig] = None) -> bytearray:
+
+def rgb_compression(image_rgb: NDArray[np.uint8], config: Optional[CCDSConfig] = None) -> bytearray:
     """
-    Compress RGB image using CCDS 122.0-B-1 standard in YCbCr color space.
-    Allocate more bytes to Y (luminance) and fewer to chroma channels.
+    Compress RGB image using CCDS 122.0-B-1 standard directly in RGB space.
+    Allocate bytes evenly to R, G, B channels.
     """
     if config is None:
         config = CCDSConfig()
 
-    # Convert RGB -> YCbCr
-    ycbcr = rgb2ycbcr(image_rgb).astype(np.uint8)
-    Y, Cb, Cr = ycbcr[..., 0], ycbcr[..., 1], ycbcr[..., 2]
+    # Split into channels
+    R = image_rgb[..., 0]
+    G = image_rgb[..., 1]
+    B = image_rgb[..., 2]
 
-    # Allocate bits: 60% Y, 20% Cb, 20% Cr
-    # Can modify this later
-    Y_config  = CCDSConfig(max_size=int(config.max_size * 0.6),
-                           wavelet_levels=config.wavelet_levels,
-                           bit_planes=config.bit_planes)
-    Cb_config = CCDSConfig(max_size=int(config.max_size * 0.2),
-                           wavelet_levels=config.wavelet_levels,
-                           bit_planes=config.bit_planes)
-    Cr_config = CCDSConfig(max_size=int(config.max_size * 0.2),
-                           wavelet_levels=config.wavelet_levels,
-                           bit_planes=config.bit_planes)
+    # Equal allocation for each channel (can tweak later)
+    channel_size = config.max_size // 3
+    R_config = CCDSConfig(max_size=channel_size,
+                          wavelet_levels=config.wavelet_levels,
+                          bit_planes=config.bit_planes)
+    G_config = CCDSConfig(max_size=channel_size,
+                          wavelet_levels=config.wavelet_levels,
+                          bit_planes=config.bit_planes)
+    B_config = CCDSConfig(max_size=channel_size,
+                          wavelet_levels=config.wavelet_levels,
+                          bit_planes=config.bit_planes)
 
     # Compress each channel
     compressed = bytearray()
-    compressed.extend(ccds_compression(Y,  Y_config))
-    compressed.extend(ccds_compression(Cb, Cb_config))
-    compressed.extend(ccds_compression(Cr, Cr_config))
+    compressed.extend(ccds_compression(R, R_config))
+    compressed.extend(ccds_compression(G, G_config))
+    compressed.extend(ccds_compression(B, B_config))
 
     return compressed
 
@@ -274,8 +275,8 @@ def test_ccds_color():
     # Save preview
     Image.fromarray(rgb).save("preview_rgb.png")
 
-    # Compress in YCbCr space
-    compressed = ycbr_conversion(rgb)
+    # Compress in rgb space
+    compressed = rgb_compression(rgb)
 
     print(f"Original size: {rgb.size} bytes")  # rgb.size is pixel_count * 3
     print(f"Compressed size: {len(compressed)} bytes")
