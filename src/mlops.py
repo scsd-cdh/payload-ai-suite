@@ -433,3 +433,114 @@ def upload_labeled_to_gcs():
     print("\nUpload complete!")
     print(f"Data is now available at: gs://{gcs_handler.bucket_name}/labeled/")
     print("=" * 80)
+
+
+def download_labeled_from_gcs():
+    """Download labeled data from Google Cloud Storage to local filesystem.
+    
+    This function:
+    1. Prompts user for confirmation before downloading
+    2. Downloads all files from GCS labeled/yes and labeled/no
+    3. Saves them to local data/labeled/yes and data/labeled/no directories
+    4. Creates directories if they don't exist
+    5. Shows progress and summary
+    """
+    import os
+    
+    # Set up logging
+    logger = logging.getLogger(__name__)
+    logger.setLevel(logging.INFO)
+    
+    logger.info("=" * 80)
+    logger.info("Download Labeled Data from Google Cloud Storage")
+    logger.info("=" * 80)
+    
+    # Step 1: Get user confirmation
+    logger.info("\nThis will download all labeled data from Google Cloud Storage.")
+    logger.info("Files will be saved to:")
+    logger.info("  - data/labeled/yes/")
+    logger.info("  - data/labeled/no/")
+    logger.info("\nExisting files with the same names will be overwritten.")
+    
+    response = input("\nDo you want to continue? (yes/no): ").strip().lower()
+    if response != 'yes':
+        logger.info("Download cancelled.")
+        return
+    
+    # Step 2: Initialize GCS handler
+    logger.info("Initializing Google Cloud Storage connection...")
+    try:
+        gcs_handler = GCSHandler()
+    except Exception as e:
+        logger.error(f"Failed to initialize GCS handler: {e}")
+        logger.error("Make sure GCS environment variables are set correctly.")
+        return
+    
+    # Step 3: Create local directories if they don't exist
+    labels = ["yes", "no"]
+    for label in labels:
+        local_dir = resolve_path(f"data/labeled/{label}")
+        os.makedirs(local_dir, exist_ok=True)
+        logger.debug(f"Created/verified directory: {local_dir}")
+    
+    # Step 4: Download files
+    logger.info("Downloading labeled data from GCS...")
+    
+    total_downloaded = 0
+    failed_downloads = []
+    
+    for label in labels:
+        gcs_prefix = f"labeled/{label}/"
+        local_dir = resolve_path(f"data/labeled/{label}")
+        
+        # List all files in GCS with this prefix
+        try:
+            blobs = list(gcs_handler.bucket.list_blobs(prefix=gcs_prefix))
+            files = [blob for blob in blobs if not blob.name.endswith('/')]
+            
+            logger.info(f"Found {len(files)} files in gs://{gcs_handler.bucket_name}/{gcs_prefix}")
+            logger.info(f"Downloading to {local_dir}/...")
+            
+            for blob in files:
+                filename = os.path.basename(blob.name)
+                local_path = os.path.join(local_dir, filename)
+                
+                try:
+                    # Download the file
+                    logger.debug(f"Downloading {blob.name} to {local_path}")
+                    data = blob.download_as_bytes()
+                    
+                    # Save to local filesystem
+                    with open(local_path, 'wb') as f:
+                        f.write(data)
+                    
+                    total_downloaded += 1
+                    if total_downloaded % 50 == 0:  # Progress indicator every 50 files
+                        logger.info(f"Progress: {total_downloaded} files downloaded...")
+                        
+                except Exception as e:
+                    logger.error(f"Failed to download {blob.name}: {e}")
+                    failed_downloads.append((blob.name, str(e)))
+                    
+        except Exception as e:
+            logger.error(f"Error listing files with prefix {gcs_prefix}: {e}")
+            continue
+    
+    # Step 5: Summary
+    logger.info("=" * 80)
+    logger.info("Download Summary:")
+    logger.info(f"- Total files downloaded: {total_downloaded}")
+    logger.info(f"- Failed downloads: {len(failed_downloads)}")
+    
+    if failed_downloads:
+        logger.warning("Failed files:")
+        for blob_name, error in failed_downloads[:10]:  # Show first 10
+            logger.warning(f"  - {blob_name}: {error}")
+        if len(failed_downloads) > 10:
+            logger.warning(f"  ... and {len(failed_downloads) - 10} more")
+    
+    logger.info("Download complete!")
+    logger.info("Data is now available at:")
+    logger.info("  - data/labeled/yes/")
+    logger.info("  - data/labeled/no/")
+    logger.info("=" * 80)
