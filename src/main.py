@@ -1,6 +1,7 @@
 """CLI entry point for tools suite access. As needed, add appropriate argument options as the project grows.
 """
 import argparse
+import logging
 import model
 import cloud as cloud
 from fetch import (
@@ -11,6 +12,10 @@ from fetch import (
     copernicus_query,
     convert_sen2fire_labeled
 )
+
+# Set up logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
 
 if __name__ == "__main__":
     """
@@ -84,4 +89,4 @@ if __name__ == "__main__":
         import mlops
         mlops.download_labeled_from_gcs()
     else:
-        print("No valid arguments provided. Use -h for help.")
+        logger.error("No valid arguments provided. Use -h for help.")

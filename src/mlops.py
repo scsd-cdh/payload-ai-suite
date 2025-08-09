@@ -23,7 +23,7 @@ try:
     if client:
         GEMINI_AVAILABLE = True
 except Exception as e:
-    print(f"{e}: no google api key found in environment.")
+    logging.warning(f"{e}: no google api key found in environment.")
 
 class GCSHandler:
     """Handler for Google Cloud Storage operations with streaming support."""
@@ -174,20 +174,20 @@ def multimodal_qc(file_input, file_name=None, use_gcs=False, gcs_handler=None):
             # Calculate delay with exponential backoff: 1min, 2min, 4min, 8min
             delay = base_delay * (2 ** attempt)
             delay_minutes = delay / 60
-            print(f"API request failed (attempt {attempt + 1}/{max_retries}): {str(e)}")
-            print(f"Retrying in {delay_minutes:.1f} minutes...")
+            logging.warning(f"API request failed (attempt {attempt + 1}/{max_retries}): {str(e)}")
+            logging.info(f"Retrying in {delay_minutes:.1f} minutes...")
             time.sleep(delay)
-    print(f"Raw response for {file_name}: {raw_response_text}")
+    logging.debug(f"Raw response for {file_name}: {raw_response_text}")
 
     if "yes" in raw_response_text and "no" not in raw_response_text:
         binary_output = "fire"
     elif "no" in raw_response_text:
         binary_output = "no fire"
     else:
-        print(f"Warning: Ambiguous response for {file_name}: {raw_response_text}. Defaulting to 'no fire'.")
+        logging.warning(f"Ambiguous response for {file_name}: {raw_response_text}. Defaulting to 'no fire'.")
         binary_output = "no fire"
 
-    print(f"Binary output for {file_name}: {binary_output}")
+    logging.info(f"Binary output for {file_name}: {binary_output}")
 
     # Determine output path
     if binary_output == "fire":
@@ -211,7 +211,7 @@ def multimodal_qc(file_input, file_name=None, use_gcs=False, gcs_handler=None):
         if success:
             print(f"File saved to: gs://{gcs_handler.bucket_name}/{gcs_path}")
         else:
-            print(f"Failed to save file to GCS: {gcs_path}")
+            logging.error(f"Failed to save file to GCS: {gcs_path}")
     else:
         # Save locally
         local_output_dir = os.path.join(".", output_path)
@@ -266,7 +266,7 @@ def run_multimodal_qc(use_gcs=False, input_path=None):
                 # Stream download from GCS
                 image_bytes = gcs_handler.download_as_bytes(gcs_path)
                 if image_bytes is None:
-                    print(f"Failed to download {gcs_path}, skipping")
+                    logging.error(f"Failed to download {gcs_path}, skipping")
                     continue
 
                 # Extract just the filename from full GCS path
@@ -281,7 +281,7 @@ def run_multimodal_qc(use_gcs=False, input_path=None):
 
         except Exception as e:
             logging.error(f"Failed to initialize GCS handler: {str(e)}")
-            print("Falling back to local processing due to GCS error")
+            logging.info("Falling back to local processing due to GCS error")
             use_gcs = False
 
     if not use_gcs:
@@ -310,7 +310,7 @@ def run_multimodal_qc(use_gcs=False, input_path=None):
                     logging.error(f"Error processing {file_path}: {str(e)}")
                     continue
         else:
-            print(f"Multimodal qc not available. Genai client not set")
+            logging.error(f"Multimodal qc not available. Genai client not set")
 
 
 def upload_labeled_to_gcs():
@@ -342,17 +342,19 @@ def upload_labeled_to_gcs():
         )
         
         if result.returncode == 0:
-            print("Cleanup completed successfully!")
-            print(result.stdout)
+            logging.info("Cleanup completed successfully!")
+            if result.stdout:
+                logging.debug(result.stdout)
         else:
-            print(f"Warning: Cleanup script returned non-zero exit code: {result.returncode}")
-            print("Error output:", result.stderr)
+            logging.warning(f"Cleanup script returned non-zero exit code: {result.returncode}")
+            if result.stderr:
+                logging.error("Error output:", result.stderr)
             response = input("\nDo you want to continue with upload anyway? (yes/no): ").strip().lower()
             if response != 'yes':
                 print("Upload cancelled.")
                 return
     except Exception as e:
-        print(f"Error running cleanup script: {e}")
+        logging.error(f"Error running cleanup script: {e}")
         response = input("\nDo you want to continue with upload anyway? (yes/no): ").strip().lower()
         if response != 'yes':
             print("Upload cancelled.")
@@ -363,8 +365,8 @@ def upload_labeled_to_gcs():
     try:
         gcs_handler = GCSHandler()
     except Exception as e:
-        print(f"Failed to initialize GCS handler: {e}")
-        print("Make sure GCS environment variables are set correctly.")
+        logging.error(f"Failed to initialize GCS handler: {e}")
+        logging.error("Make sure GCS environment variables are set correctly.")
         return
     
     # Step 3: Upload files
@@ -414,7 +416,7 @@ def upload_labeled_to_gcs():
                         failed_uploads.append(file_path)
                         
                 except Exception as e:
-                    print(f"  Error uploading {filename}: {e}")
+                    logging.error(f"Error uploading {filename}: {e}")
                     failed_uploads.append(file_path)
     
     # Step 4: Summary
