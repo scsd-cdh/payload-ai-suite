@@ -44,7 +44,10 @@ import numpy as np
 from numpy.typing import NDArray
 
 import pywt
-
+import rawpy
+import numpy as np
+from PIL import Image
+from skimage.color import rgb2ycbcr
 
 class AVIFConfig(BaseModel):
     """Configuration for AVIF encoding."""
@@ -99,6 +102,7 @@ def perform_dwt(image_data: NDArray[np.uint8], levels: int) -> List[NDArray]:
     Returns:
         List of wavelet subbands (LL, HL, LH, HH for each level)
     """
+    # Using haar wavelets because it is the fastest one
     coeffs = pywt.wavedec2(image_data, wavelet='haar', level=levels)  
     # coeffs[0] = LLn
     # coeffs[1:] = (HLn, LHn, HHn), (HLn-1, LHn-1, HHn-1), ...
@@ -206,10 +210,10 @@ def ccds_compression(image_data: NDArray[np.uint8], config: Optional[CCDSConfig]
 
     return compressed_data[:available_space]
 
-import rawpy
-import numpy as np
-from PIL import Image
 def test_ccds():
+    """
+    Test CCDS compression in grayscale (using previously defined function)
+    """
     # Load NEF and convert to RGB
     with rawpy.imread("image.NEF") as raw:
         rgb = raw.postprocess()
@@ -217,7 +221,7 @@ def test_ccds():
     # Convert to grayscale for CCDS test (CCDS spec is often single-band)
     gray = np.mean(rgb, axis=2).astype(np.uint8)
 
-    # Optional: save grayscale preview
+    # Save preview in grayscale
     Image.fromarray(gray).save("preview.png")
 
     # Run CCDS compression
@@ -227,9 +231,7 @@ def test_ccds():
     print(f"Compressed size: {len(compressed)} bytes")
     print(f"First 64 bytes of compressed data: {compressed[:64]}")
 
-from skimage.color import rgb2ycbcr
-
-def ccds_compression_ycbcr(image_rgb: NDArray[np.uint8], config: Optional[CCDSConfig] = None) -> bytearray:
+def ycbr_conversion(image_rgb: NDArray[np.uint8], config: Optional[CCDSConfig] = None) -> bytearray:
     """
     Compress RGB image using CCDS 122.0-B-1 standard in YCbCr color space.
     Allocate more bytes to Y (luminance) and fewer to chroma channels.
@@ -242,6 +244,7 @@ def ccds_compression_ycbcr(image_rgb: NDArray[np.uint8], config: Optional[CCDSCo
     Y, Cb, Cr = ycbcr[..., 0], ycbcr[..., 1], ycbcr[..., 2]
 
     # Allocate bits: 60% Y, 20% Cb, 20% Cr
+    # Can modify this later
     Y_config  = CCDSConfig(max_size=int(config.max_size * 0.6),
                            wavelet_levels=config.wavelet_levels,
                            bit_planes=config.bit_planes)
@@ -260,17 +263,19 @@ def ccds_compression_ycbcr(image_rgb: NDArray[np.uint8], config: Optional[CCDSCo
 
     return compressed
 
-
 def test_ccds_color():
+    """
+    Test CCDS compression in color
+    """
     # Load NEF and convert to RGB
     with rawpy.imread("image.NEF") as raw:
         rgb = raw.postprocess()
 
-    # Optional: save preview
+    # Save preview
     Image.fromarray(rgb).save("preview_rgb.png")
 
     # Compress in YCbCr space
-    compressed = ccds_compression_ycbcr(rgb)
+    compressed = ycbr_conversion(rgb)
 
     print(f"Original size: {rgb.size} bytes")  # rgb.size is pixel_count * 3
     print(f"Compressed size: {len(compressed)} bytes")
