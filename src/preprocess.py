@@ -60,11 +60,11 @@ def populate(X_array, y_array, path, use_nir=False, end=False, gcs_handler=None)
             for image_path in image_paths:
                 image_bytes = gcs_handler.download_as_bytes(image_path)
                 if image_bytes is None:
-                    print(f"Could not read {image_path}, skipping...")
+                    logger.warning(f"Could not read {image_path}, skipping...")
                     continue
                 rgb = stream_image_from_gcs(image_bytes)
                 if rgb is None:
-                    print(f"Could not decode {image_path}, skipping...")
+                    logger.warning(f"Could not decode {image_path}, skipping...")
                     continue
 
                 rgb = cv2.resize(rgb, (224, 224))
@@ -92,7 +92,7 @@ def populate(X_array, y_array, path, use_nir=False, end=False, gcs_handler=None)
 
                 rgb = cv2.imread(image_path)
                 if rgb is None:
-                    print(f"Could not read {image_path}, skipping...")
+                    logger.warning(f"Could not read {image_path}, skipping...")
                     continue
                 rgb = cv2.resize(rgb, (224, 224))
 
@@ -122,7 +122,7 @@ def populate(X_array, y_array, path, use_nir=False, end=False, gcs_handler=None)
             while len(y_array) < len(X_array):
                 y_array.append("N")
     except cv2.error as e:
-        print(f"CV2 error in preprocess: {e}")
+        logger.error(f"CV2 error in preprocess: {e}")
         raise e
 
     return X_array, y_array

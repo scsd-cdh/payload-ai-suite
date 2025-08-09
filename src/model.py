@@ -28,6 +28,7 @@ from paths import resolve_path, get_model_path
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
+logger = logging.getLogger(__name__)
 
 def train(validate=True, epochs=12, use_nir=False, use_gcs=False):
     """
@@ -81,10 +82,10 @@ def train(validate=True, epochs=12, use_nir=False, use_gcs=False):
     y_test = np.array(y_test)
     X_test = np.array(X_test)
 
-    print("Shape of an image in X_train: ", X_train.shape)
-    print("Shape of an image in X_test: ", X_test.shape)
-    print("y_train Shape: ", y_train.shape)
-    print("y_test Shape: ", y_test.shape)
+    logger.info(f"Shape of an image in X_train: {X_train.shape}")
+    logger.info(f"Shape of an image in X_test: {X_test.shape}")
+    logger.info(f"y_train Shape: {y_train.shape}")
+    logger.info(f"y_test Shape: {y_test.shape}")
 
     input_channels = 4 if use_nir else 3
     input_shape = (224, 224, input_channels)
@@ -104,7 +105,7 @@ def train(validate=True, epochs=12, use_nir=False, use_gcs=False):
         layer.trainable = False
 
     for (i, layer) in enumerate(vgg.layers):
-        print(str(i) + " " + layer.__class__.__name__, layer.trainable)
+        logger.info(f"{i} {layer.__class__.__name__} {layer.trainable}")
 
         def create_top(bottom_model, num_classes):
             top_model = bottom_model.output
@@ -119,7 +120,7 @@ def train(validate=True, epochs=12, use_nir=False, use_gcs=False):
     head = create_top(vgg, num_classes)
     model = keras.models.Model(inputs=vgg.input, outputs=head)
 
-    print(model.summary())
+    model.summary(print_fn=logger.info)
     model.compile(optimizer='adam', loss='categorical_crossentropy', metrics=['accuracy'])
 
     checkpoint_path = "training_checkpoints/cp.weights.h5"
@@ -128,7 +129,7 @@ def train(validate=True, epochs=12, use_nir=False, use_gcs=False):
     latest = tf.train.latest_checkpoint(checkpoint_dir)
     if latest:
         model.load_weights(latest)
-        print("Loaded weights from checkpoint.")
+        logger.info("Loaded weights from checkpoint.")
 
     # Create a callback that saves the model's weights
     cp_callback = tf.keras.callbacks.ModelCheckpoint(filepath=checkpoint_path,
@@ -151,7 +152,7 @@ def train(validate=True, epochs=12, use_nir=False, use_gcs=False):
 
     if validate:
         test_loss, test_accuracy = model.evaluate(X_test, y_test)
-        print(f'Test accuracy: {test_accuracy:.4f}')
+        logger.info(f'Test accuracy: {test_accuracy:.4f}')
         epochs = range(len(accuracy))
         plt.plot(epochs, accuracy, 'r', label='Training accuracy')
         plt.plot(epochs, val_accuracy, 'b', label='Validation accuracy')
@@ -188,9 +189,9 @@ def run_inference(onnx_model=None, data_target=None):
     if onnx_model is None:
         onnx_model = get_model_path('zetane.onnx')
     if not data_target.any():
-        print("Please provide a test target")
+        logger.error("Please provide a test target")
         return
     session = rt.InferenceSession(onnx_model, providers=rt.get_available_providers)
     input_name = session.get_inputs()[0].name
     prediction_onnx = session.run(None, {input_name: data_target.astype(np.float32)})[0]
-    print(prediction_onnx)
+    logger.info(f"Prediction: {prediction_onnx}")
