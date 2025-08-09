@@ -163,12 +163,7 @@ def test_avif_export():
     from pathlib import Path
 
     # Path to your test image (make sure it exists)
-    input_image = "image.NEF"  # or .jpg, .bmp, etc.
-    
-    # Check file exists first
-    if not Path(input_image).exists():
-        print("❌ Input image not found. Please place a test image named 'test_image.png' in this folder.")
-        return
+    input_image = "raw-images/image.NEF"  # or .jpg, .bmp, etc.
     
     # Optional custom config
     config = AVIFConfig(
@@ -178,14 +173,12 @@ def test_avif_export():
         bit_depth=8
     )
 
-    print("🔄 Compressing image to AVIF...")
     success = export_avif(input_image, config)
-
     if success:
         output_image = Path(input_image).with_suffix('.avif')
-        print(f"✅ AVIF export succeeded! Output file: {output_image}")
+        print(f"AVIF export succeeded! Output file: {output_image}")
     else:
-        print("❌ AVIF export failed.")
+        print("AVIF export failed.")
         
 
 def ccds_compression(image_data: NDArray[np.uint8], config: Optional[CCDSConfig] = None) -> bytearray:
