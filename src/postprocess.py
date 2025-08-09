@@ -43,6 +43,8 @@ from pydantic import BaseModel, Field
 import numpy as np
 from numpy.typing import NDArray
 
+import pywt
+
 
 class AVIFConfig(BaseModel):
     """Configuration for AVIF encoding."""
@@ -86,6 +88,93 @@ def export_avif(input_image: str, config: Optional[AVIFConfig] = None) -> bool:
         return False
     return True
 
+# TODO: Implement!
+def perform_dwt(image_data: NDArray[np.uint8], levels: int) -> List[NDArray]:
+    """Perform multi-level 2D Discrete Wavelet Transform.
+
+    Args:
+        image_data: Input image data
+        levels: Number of decomposition levels
+
+    Returns:
+        List of wavelet subbands (LL, HL, LH, HH for each level)
+    """
+    coeffs = pywt.wavedec2(image_data, wavelet='haar', level=levels)  
+    # coeffs[0] = LLn
+    # coeffs[1:] = (HLn, LHn, HHn), (HLn-1, LHn-1, HHn-1), ...
+    
+    subbands = []
+    LLn = coeffs[0]
+    subbands.append(LLn)
+    for detail_level in coeffs[1:]:
+        HL, LH, HH = detail_level
+        subbands.extend([HL, LH, HH])
+    return subbands
+
+# TODO: Implement!
+def encode_bit_plane(subband: NDArray, bit_plane: int) -> bytearray:
+    """Encode a specific bit plane of a wavelet subband.
+
+    Args:
+        subband: Wavelet subband data
+        bit_plane: Bit plane index (0-7)
+
+    Returns:
+        Encoded bit plane data
+    """
+    # Convert to integers
+    arr = np.rint(subband).astype(np.int32)  # round in case of floats
+    
+    # Get the bit mask
+    mask = 1 << bit_plane
+    bits = (np.abs(arr) & mask) >> bit_plane  # 0 or 1
+
+    # Flatten row-major
+    flat_bits = bits.flatten()
+
+    # Pack bits into bytes
+    packed = bytearray()
+    for i in range(0, len(flat_bits), 8):
+        byte_val = 0
+        for b in flat_bits[i:i+8]:
+            byte_val = (byte_val << 1) | int(b)
+        # Pad last byte with zeros if needed
+        if len(flat_bits[i:i+8]) < 8:
+            byte_val <<= (8 - len(flat_bits[i:i+8]))
+        packed.append(byte_val)
+
+    return packed
+
+
+def test_avif_export():
+    from pathlib import Path
+
+    # Path to your test image (make sure it exists)
+    input_image = "image.NEF"  # or .jpg, .bmp, etc.
+    
+    # Check file exists first
+    if not Path(input_image).exists():
+        print("❌ Input image not found. Please place a test image named 'test_image.png' in this folder.")
+        return
+    
+    # Optional custom config
+    config = AVIFConfig(
+        speed=4,
+        lossless=True,
+        yuv_format="444",
+        bit_depth=8
+    )
+
+    print("🔄 Compressing image to AVIF...")
+    success = export_avif(input_image, config)
+
+    if success:
+        output_image = Path(input_image).with_suffix('.avif')
+        print(f"✅ AVIF export succeeded! Output file: {output_image}")
+    else:
+        print("❌ AVIF export failed.")
+        
+
 def ccds_compression(image_data: NDArray[np.uint8], config: Optional[CCDSConfig] = None) -> bytearray:
     """Compress image data using CCDS 122.0-B-1 standard.
 
@@ -117,28 +206,26 @@ def ccds_compression(image_data: NDArray[np.uint8], config: Optional[CCDSConfig]
 
     return compressed_data[:available_space]
 
-# TODO: Implement!
-def perform_dwt(image_data: NDArray[np.uint8], levels: int) -> List[NDArray]:
-    """Perform multi-level 2D Discrete Wavelet Transform.
+import rawpy
+import numpy as np
+from PIL import Image
+def test_ccds():
+    # Load NEF and convert to RGB
+    with rawpy.imread("image.NEF") as raw:
+        rgb = raw.postprocess()
 
-    Args:
-        image_data: Input image data
-        levels: Number of decomposition levels
+    # Convert to grayscale for CCDS test (CCDS spec is often single-band)
+    gray = np.mean(rgb, axis=2).astype(np.uint8)
 
-    Returns:
-        List of wavelet subbands (LL, HL, LH, HH for each level)
-    """
-    return []
+    # Optional: save grayscale preview
+    Image.fromarray(gray).save("preview.png")
 
-# TODO: Implement!
-def encode_bit_plane(subband: NDArray, bit_plane: int) -> bytearray:
-    """Encode a specific bit plane of a wavelet subband.
+    # Run CCDS compression
+    compressed = ccds_compression(gray)
 
-    Args:
-        subband: Wavelet subband data
-        bit_plane: Bit plane index (0-7)
+    print(f"Original size: {gray.size} bytes")
+    print(f"Compressed size: {len(compressed)} bytes")
+    print(f"First 64 bytes of compressed data: {compressed[:64]}")
 
-    Returns:
-        Encoded bit plane data
-    """
-    return bytearray()
+test_ccds()
+
