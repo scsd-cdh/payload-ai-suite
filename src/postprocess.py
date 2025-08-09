@@ -128,14 +128,22 @@ def encode_bit_plane(subband: NDArray, bit_plane: int) -> bytearray:
         Encoded bit plane data
     """
     # Convert to integers rounding it to nearest one
-    arr = np.rint(subband).astype(np.int32)  # round in case of floats
+    arr = np.rint(subband).astype(np.int32) 
     
-    # Get the bit mask
-    mask = 1 << bit_plane
-    bits = (np.abs(arr) & mask) >> bit_plane  # 0 or 1
+    # Create a mask that has a 1 only in the desired bit position
+    bit_mask = 1 << bit_plane   
+
+    # Take absolute values to avoid negative bit patterns
+    absolute_values = np.abs(arr)
+
+    # Use bitwise AND to isolate just that one bit in each value
+    isolated_bit_values = absolute_values & bit_mask
+
+    # Shift that bit down so it's either 0 or 1
+    bit_plane_data = isolated_bit_values >> bit_plane
 
     # Flatten row-major array into one dimension
-    flat_bits = bits.flatten()
+    flat_bits = bit_plane_data.flatten()
 
     # Pack bits into bytes
     packed = bytearray()
