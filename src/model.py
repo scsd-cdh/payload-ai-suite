@@ -29,9 +29,10 @@ from paths import resolve_path, get_model_path
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+#  change to resent 50 from vgg check if keras has and figure out how to train it!!!!!!
 def train(validate=True, epochs=12, use_nir=False, use_gcs=False):
     """
-    Train CNN VGG model on labeled data.
+    Train CNN ResNet50 model on labeled data, 2 classes.
 
     Args:
         validate (bool): Whether to validate the model after training.
@@ -89,21 +90,21 @@ def train(validate=True, epochs=12, use_nir=False, use_gcs=False):
     input_channels = 4 if use_nir else 3
     input_shape = (224, 224, input_channels)
 
-    weights = 'imagenet' if input_channels == 3 else None
+    weights = None
 
-    vgg = tf.keras.applications.vgg16.VGG16(
+    resnet50 = tf.keras.applications.resnet50.ResNet50(
         weights=weights,
         include_top=False,
         input_shape=input_shape
     )
-    #since VGG16 is pre-trained w/ 3-channel RGB images, this if-else ensure it runs on a 4-channel system
+    #since ResNet50 is pre-trained w/ 3-channel RGB images, this if-else ensure it runs on a 4-channel system
 
     # Here we freeze the last 4 layers
     # Layers are set to trainable as True by default
-    for layer in vgg.layers:
+    for layer in resnet50.layers:
         layer.trainable = False
 
-    for (i, layer) in enumerate(vgg.layers):
+    for (i, layer) in enumerate(resnet50.layers):
         print(str(i) + " " + layer.__class__.__name__, layer.trainable)
 
         def create_top(bottom_model, num_classes):
@@ -116,8 +117,8 @@ def train(validate=True, epochs=12, use_nir=False, use_gcs=False):
             return output
 
     num_classes = 2
-    head = create_top(vgg, num_classes)
-    model = keras.models.Model(inputs=vgg.input, outputs=head)
+    head = create_top(resnet50, num_classes)
+    model = keras.models.Model(inputs=resnet50.input, outputs=head)
 
     print(model.summary())
     model.compile(optimizer='adam', loss='categorical_crossentropy', metrics=['accuracy'])
