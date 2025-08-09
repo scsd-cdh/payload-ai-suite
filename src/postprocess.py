@@ -219,26 +219,6 @@ def ccds_compression(image_data: NDArray[np.uint8], config: Optional[CCDSConfig]
 
     return compressed_data[:available_space]
 
-def test_ccds():
-    """
-    Test CCDS compression in grayscale (using previously defined function)
-    """
-    # Load NEF and convert to RGB
-    with rawpy.imread("image.NEF") as raw:
-        rgb = raw.postprocess()
-
-    # Convert to grayscale for CCDS test (CCDS spec is often single-band)
-    gray = np.mean(rgb, axis=2).astype(np.uint8)
-
-    # Save preview in grayscale
-    Image.fromarray(gray).save("preview.png")
-
-    # Run CCDS compression
-    compressed = ccds_compression(gray)
-
-    print(f"Original size: {gray.size} bytes")
-    print(f"Compressed size: {len(compressed)} bytes")
-
 
 def rgb_compression(image_rgb: NDArray[np.uint8], config: Optional[CCDSConfig] = None) -> bytearray:
     """
