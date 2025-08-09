@@ -47,6 +47,7 @@ import pywt
 import rawpy
 import numpy as np
 from PIL import Image
+from pathlib import Path
 
 class AVIFConfig(BaseModel):
     """Configuration for AVIF encoding."""
@@ -101,7 +102,8 @@ def perform_dwt(image_data: NDArray[np.uint8], levels: int) -> List[NDArray]:
     Returns:
         List of wavelet subbands (LL, HL, LH, HH for each level)
     """
-    # Using haar wavelets because it is the fastest one
+    # Using haar wavelets because it is the fastest one, levels by default is 3
+    # https://pywavelets.readthedocs.io/en/latest/ref/2d-dwt-and-idwt.html
     coeffs = pywt.wavedec2(image_data, wavelet='haar', level=levels)  
     # coeffs[0] = LLn
     # coeffs[1:] = (HLn, LHn, HHn), (HLn-1, LHn-1, HHn-1), ...
@@ -125,14 +127,14 @@ def encode_bit_plane(subband: NDArray, bit_plane: int) -> bytearray:
     Returns:
         Encoded bit plane data
     """
-    # Convert to integers
+    # Convert to integers rounding it to nearest one
     arr = np.rint(subband).astype(np.int32)  # round in case of floats
     
     # Get the bit mask
     mask = 1 << bit_plane
     bits = (np.abs(arr) & mask) >> bit_plane  # 0 or 1
 
-    # Flatten row-major
+    # Flatten row-major array into one dimension
     flat_bits = bits.flatten()
 
     # Pack bits into bytes
@@ -228,7 +230,6 @@ def test_ccds():
 
     print(f"Original size: {gray.size} bytes")
     print(f"Compressed size: {len(compressed)} bytes")
-    print(f"First 64 bytes of compressed data: {compressed[:64]}")
 
 
 def rgb_compression(image_rgb: NDArray[np.uint8], config: Optional[CCDSConfig] = None) -> bytearray:
@@ -268,18 +269,30 @@ def test_ccds_color():
     """
     Test CCDS compression in color
     """
-    # Load NEF and convert to RGB
-    with rawpy.imread("image.NEF") as raw:
-        rgb = raw.postprocess()
+    input_path = Path("raw-images")
+    output_path = Path("previews")
+    output_path.mkdir(parents=True, exist_ok=True)
 
-    # Save preview
-    Image.fromarray(rgb).save("preview_rgb.png")
+    # Loop through all .NEF files in the folder
+    for nef_file in input_path.glob("*.NEF"):
+        # Load NEF → RGB
+        with rawpy.imread(str(nef_file)) as raw:
+            rgb = raw.postprocess()
 
-    # Compress in rgb space
-    compressed = rgb_compression(rgb)
+        # Save preview
+        preview_file = output_path / f"{nef_file.stem}_preview_rgb.png"
+        Image.fromarray(rgb).save(preview_file)
 
-    print(f"Original size: {rgb.size} bytes")  # rgb.size is pixel_count * 3
-    print(f"Compressed size: {len(compressed)} bytes")
-    print(f"First 64 bytes: {compressed[:64]}")
+        # Compress in RGB space
+        compressed = rgb_compression(rgb)
+
+        # Save compressed binary
+        compressed_file = output_path / f"{nef_file.stem}_compressed.bin"
+        with open(compressed_file, "wb") as f:
+            f.write(compressed)
+
+        # Print results
+        print(f"  Original size: {rgb.size} bytes")
+        print(f"  Compressed size: {len(compressed)} bytes")
 
 test_ccds_color()
