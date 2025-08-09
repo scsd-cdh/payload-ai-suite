@@ -53,7 +53,6 @@ if __name__ == "__main__":
     parser.add_argument('--multimodal-qc', required=False, action='store_true', help="Run multimodal quality control check")
     parser.add_argument('--use-gcs', required=False, action='store_true', help="Stream training data from Google Cloud Storage")
     parser.add_argument('--cloud-mask', required=False, action='store_true', help="Export OmniCloudMask models to ONNX and test on labeled data")
-    parser.add_argument('--convert-image', required=False, action='store_true', help="Convert bayer images to AVIF format")
 
     args = parser.parse_args()
     if args.run_model:
