@@ -227,5 +227,53 @@ def test_ccds():
     print(f"Compressed size: {len(compressed)} bytes")
     print(f"First 64 bytes of compressed data: {compressed[:64]}")
 
-test_ccds()
+from skimage.color import rgb2ycbcr
 
+def ccds_compression_ycbcr(image_rgb: NDArray[np.uint8], config: Optional[CCDSConfig] = None) -> bytearray:
+    """
+    Compress RGB image using CCDS 122.0-B-1 standard in YCbCr color space.
+    Allocate more bytes to Y (luminance) and fewer to chroma channels.
+    """
+    if config is None:
+        config = CCDSConfig()
+
+    # Convert RGB -> YCbCr
+    ycbcr = rgb2ycbcr(image_rgb).astype(np.uint8)
+    Y, Cb, Cr = ycbcr[..., 0], ycbcr[..., 1], ycbcr[..., 2]
+
+    # Allocate bits: 60% Y, 20% Cb, 20% Cr
+    Y_config  = CCDSConfig(max_size=int(config.max_size * 0.6),
+                           wavelet_levels=config.wavelet_levels,
+                           bit_planes=config.bit_planes)
+    Cb_config = CCDSConfig(max_size=int(config.max_size * 0.2),
+                           wavelet_levels=config.wavelet_levels,
+                           bit_planes=config.bit_planes)
+    Cr_config = CCDSConfig(max_size=int(config.max_size * 0.2),
+                           wavelet_levels=config.wavelet_levels,
+                           bit_planes=config.bit_planes)
+
+    # Compress each channel
+    compressed = bytearray()
+    compressed.extend(ccds_compression(Y,  Y_config))
+    compressed.extend(ccds_compression(Cb, Cb_config))
+    compressed.extend(ccds_compression(Cr, Cr_config))
+
+    return compressed
+
+
+def test_ccds_color():
+    # Load NEF and convert to RGB
+    with rawpy.imread("image.NEF") as raw:
+        rgb = raw.postprocess()
+
+    # Optional: save preview
+    Image.fromarray(rgb).save("preview_rgb.png")
+
+    # Compress in YCbCr space
+    compressed = ccds_compression_ycbcr(rgb)
+
+    print(f"Original size: {rgb.size} bytes")  # rgb.size is pixel_count * 3
+    print(f"Compressed size: {len(compressed)} bytes")
+    print(f"First 64 bytes: {compressed[:64]}")
+
+test_ccds_color()
