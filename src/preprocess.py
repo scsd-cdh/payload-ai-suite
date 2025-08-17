@@ -82,7 +82,7 @@ def populate(X_array, y_array, path, use_nir=False, end=False, gcs_handler=None)
                     try:
                         fused_result = rgb_nir_fusion(rgb, use_enhanced_red=True)
                     except Exception as e:
-                        logger.warning(f"{e}: issue with rgb nir fusion technique, skipping")
+                        logger.warning(f"{e}: issue with rgb nir fusion technique, skipping for {image_path}")
                         fused_result = rgb
 
                     rgb = dyn_zscore_normalize(fused_result)
