@@ -18,7 +18,7 @@ logger = logging.getLogger(__name__)
 class FusionInput(BaseModel):
     """Validation model for RGB-NIR fusion input."""
     image_shape: tuple = Field(..., description="Shape of input image")
-    
+
     @validator('image_shape')
     def validate_shape(cls, v):
         if len(v) != 3:
@@ -31,7 +31,7 @@ class FusionInput(BaseModel):
 class FusionOutput(BaseModel):
     """Validation model for RGB-NIR fusion output."""
     image_shape: tuple = Field(..., description="Shape of output image")
-    
+
     @validator('image_shape')
     def validate_shape(cls, v):
         if len(v) != 3:
@@ -79,8 +79,13 @@ def populate(X_array, y_array, path, use_nir=False, end=False, gcs_handler=None)
                     rgb_nir = dyn_zscore_normalize(rgb_nir)
                     X_array.append(rgb_nir)
                 else:
-                    fused_result = rgb_nir_fusion(rgb, use_enhanced_red=True)
-                    rgb = dyn_zscore_normalize(rgb)
+                    try:
+                        fused_result = rgb_nir_fusion(rgb, use_enhanced_red=True)
+                    except Exception as e:
+                        logger.warning(f"{e}: issue with rgb nir fusion technique, skipping for {image_path}")
+                        fused_result = rgb
+                    # Normalization still applied after fallback
+                    rgb = dyn_zscore_normalize(fused_result)
                     X_array.append(rgb)
 
                 if not end:
@@ -108,11 +113,14 @@ def populate(X_array, y_array, path, use_nir=False, end=False, gcs_handler=None)
                 else:
                     # RGB NIR fusion algorthm still relevant if we have 4 channels
                     # the `use_nir` flag is soely for the AI model to take in a 4 channel input tensor
-                    # TODO: figure out order of dyn_z_score normalize and rgb fusion
-                    fused_result = rgb_nir_fusion(rgb, use_enhanced_red=True)
-                    rgb = dyn_zscore_normalize(rgb)
-
-                    X_array.append(fused_result)
+                    try:
+                        fused_result = rgb_nir_fusion(rgb, use_enhanced_red=True)
+                    except Exception as e:
+                        logger.warning(f"{e}: issue with the rgb nir fusion technique. Skipping for {image_path}")
+                        fused_result = rgb
+                    # Normalization still applied after fallback 
+                    rgb = dyn_zscore_normalize(fused_result)
+                    X_array.append(rgb)
 
                 if not end:
                     y_array.append(image_path[0:1])
@@ -217,7 +225,7 @@ def rgb_nir_fusion(image_data: np.ndarray[Any, np.dtype[np.integer[Any] | np.flo
     We fuse it back together using the inverse of RGB -> HSV matrix. Hue and saturation remain untouched.
     """
     logger.info(f"RGB-NIR fusion called with shape: {image_data.shape}")
-    
+
     # Validate input
     try:
         input_validation = FusionInput(image_shape=image_data.shape)
@@ -236,14 +244,14 @@ def rgb_nir_fusion(image_data: np.ndarray[Any, np.dtype[np.integer[Any] | np.flo
         enhanced_red = (1 - alpha) * red + alpha * nir
         fused = np.stack([blue, green, enhanced_red], axis=-1)
         logger.debug(f"Enhanced red fusion complete - output shape: {fused.shape}")
-        
+
         # Validate output
         try:
             output_validation = FusionOutput(image_shape=fused.shape)
         except ValueError as e:
             logger.error(f"Output validation failed: {e}")
             raise
-        
+
         return fused
 
     elif use_hsv_fusion:
@@ -255,14 +263,14 @@ def rgb_nir_fusion(image_data: np.ndarray[Any, np.dtype[np.integer[Any] | np.flo
         fused_hsv = cv2.merge([h, s, enhanced_v])
         fused = cv2.cvtColor(fused_hsv, cv2.COLOR_HSV2BGR)
         logger.debug(f"HSV fusion complete - output shape: {fused.shape}")
-        
+
         # Validate output
         try:
             output_validation = FusionOutput(image_shape=fused.shape)
         except ValueError as e:
             logger.error(f"Output validation failed: {e}")
             raise
-        
+
         return fused
 
     else:
