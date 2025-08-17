@@ -84,7 +84,7 @@ def populate(X_array, y_array, path, use_nir=False, end=False, gcs_handler=None)
                     except Exception as e:
                         logger.warning(f"{e}: issue with rgb nir fusion technique, skipping for {image_path}")
                         fused_result = rgb
-
+                    # Normalization still applied after fallback
                     rgb = dyn_zscore_normalize(fused_result)
                     X_array.append(rgb)
 
@@ -118,6 +118,7 @@ def populate(X_array, y_array, path, use_nir=False, end=False, gcs_handler=None)
                     except Exception as e:
                         logger.warning(f"{e}: issue with the rgb nir fusion technique. Skipping for {image_path}")
                         fused_result = rgb
+                    # Normalization still applied after fallback 
                     rgb = dyn_zscore_normalize(fused_result)
                     X_array.append(rgb)
 
