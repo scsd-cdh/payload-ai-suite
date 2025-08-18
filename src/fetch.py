@@ -179,9 +179,7 @@ def fetch_sensor_data(sensor, time_range) -> pd.DataFrame:
         pd.DataFrame: A DataFrame containing the sensor data.
     """
     
-    #NASA_KEY = os.getenv("NASA_KEY")
-    NASA_KEY="b1b20f90153679ff512ebded365c5553"
-    # For demonstration purposes, we will use a hardcoded key.
+    NASA_KEY = os.getenv("NASA_KEY")
     
     if not NASA_KEY:
         raise RuntimeError("Please set NASA_KEY in your .env file.")
@@ -222,11 +220,9 @@ def setup_auth():
     """
     # Your client credentials
     # If not set, please check README for further information.
-    # client_id = os.getenv("CLIENT_ID")
-    # client_secret = os.getenv("CLIENT_SECRET")
-    
-    client_id = "sh-a4d6c01f-77db-44ab-bcca-c5bc3b8f1f8f"
-    client_secret = "iKPvNMVRYxBjR0ACKABtQOBX1fNREpQy"
+    client_id = os.getenv("CLIENT_ID")
+    client_secret = os.getenv("CLIENT_SECRET")
+
 
     # Create a session
     client = BackendApplicationClient(client_id=client_id)
