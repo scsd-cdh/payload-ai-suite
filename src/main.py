@@ -1,6 +1,7 @@
 """CLI entry point for tools suite access. As needed, add appropriate argument options as the project grows.
 """
 import argparse
+import logging
 import model
 import cloud as cloud
 from fetch import (
@@ -11,6 +12,10 @@ from fetch import (
     copernicus_query,
     convert_sen2fire_labeled
 )
+
+# Set up logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
 
 if __name__ == "__main__":
     """
@@ -55,6 +60,7 @@ if __name__ == "__main__":
     parser.add_argument('--process-sen2fire', required=False, action='store_true', help="Convert Sen2Fire dataset to a state to be processed by the pipeline.")
     parser.add_argument('--cloud-mask', required=False, action='store_true', help="Export OmniCloudMask models to ONNX and test on labeled data")
     parser.add_argument('--upload-labeled', required=False, action='store_true', help="Upload labeled data to GCS after running cleanup")
+    parser.add_argument('--download-labeled', required=False, action='store_true', help="Download labeled data from GCS to local filesystem")
 
     args = parser.parse_args()
     if args.run_model:
@@ -79,5 +85,8 @@ if __name__ == "__main__":
     elif args.upload_labeled:
         import mlops
         mlops.upload_labeled_to_gcs()
+    elif args.download_labeled:
+        import mlops
+        mlops.download_labeled_from_gcs()
     else:
-        print("No valid arguments provided. Use -h for help.")
+        logger.error("No valid arguments provided. Use -h for help.")

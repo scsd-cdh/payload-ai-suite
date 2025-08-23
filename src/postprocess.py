@@ -1,16 +1,19 @@
 import subprocess
 import os
-from typing import List, Optional, Tuple
+import logging
+from typing import List, Optional
 from pydantic import BaseModel, Field
 import numpy as np
 from numpy.typing import NDArray
 
 import pywt
 import rawpy
-import numpy as np
 from PIL import Image
 from pathlib import Path
 import struct
+# Set up logging
+logger = logging.getLogger(__name__)
+
 
 class AVIFConfig(BaseModel):
     """Configuration for AVIF encoding."""
@@ -63,7 +66,7 @@ def export_avif(input_image: str, config: Optional[AVIFConfig] = None) -> bool:
 
     result = subprocess.run(cmd, capture_output=True, text=True)
     if result.returncode != 0:
-        print(f"Error: {result.stderr}")
+        logger.error(f"Error: {result.stderr}")
         return False
     return True
 

@@ -7,7 +7,12 @@ Clean up files in the ../data/labeled directory by:
 
 import os
 import hashlib
+import logging
 from collections import defaultdict
+
+# Set up logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 
 def compute_file_hash(filepath):
@@ -20,7 +25,7 @@ def compute_file_hash(filepath):
                 sha256_hash.update(byte_block)
         return sha256_hash.hexdigest()
     except Exception as e:
-        print(f"Error reading {filepath}: {e}")
+        logger.error(f"Error reading {filepath}: {e}")
         return None
 
 
@@ -38,9 +43,9 @@ def find_and_remove_empty_files(directory, dry_run=True):
                 if not dry_run:
                     try:
                         os.remove(filepath)
-                        print(f"Removed empty file: {filepath}")
+                        logger.info(f"Removed empty file: {filepath}")
                     except Exception as e:
-                        print(f"Error removing {filepath}: {e}")
+                        logger.error(f"Error removing {filepath}: {e}")
     
     return empty_files
 
@@ -79,9 +84,9 @@ def find_and_remove_duplicates(directory, dry_run=True):
                 if not dry_run:
                     try:
                         os.remove(filepath)
-                        print(f"Removed duplicate: {filepath}")
+                        logger.info(f"Removed duplicate: {filepath}")
                     except Exception as e:
-                        print(f"Error removing {filepath}: {e}")
+                        logger.error(f"Error removing {filepath}: {e}")
     
     return removed_files
 

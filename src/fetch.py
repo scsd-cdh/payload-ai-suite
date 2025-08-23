@@ -194,7 +194,7 @@ def extract_eonet_coordinates(file_path='./events/categories.json'):
         return [coordinates]
 
     except Exception as e:
-        print(f"Error extracting coordinates: {e}")
+        logger.error(f"Error extracting coordinates: {e}")
         return None
 
 def extract_time_ranges_from_eonet(file_path='./events/categories.json'):
@@ -227,7 +227,7 @@ def extract_time_ranges_from_eonet(file_path='./events/categories.json'):
         return time_ranges
 
     except Exception as e:
-        print(f"Error extracting time ranges: {e}")
+        logger.error(f"Error extracting time ranges: {e}")
         return []
 
 def write_image(response, metadata, location=None, use_gcs=False):
@@ -288,9 +288,9 @@ def write_image(response, metadata, location=None, use_gcs=False):
             # Write the response content data to a image file
             with open(filename, 'wb') as f:
                 f.write(response.content)
-            print(f"Image successfully saved to {filename}")
+            logger.info(f"Image successfully saved to {filename}")
     except Exception as e:
-        print(f"Error writing image: {e}")
+        logger.error(f"Error writing image: {e}")
 
 def convert_coords_to_bbox(longitude, latitude, buffer_distance=5000):
     wgs84 = Proj(proj="latlong", datum="WGS84")
@@ -321,10 +321,10 @@ class Location:
     def __init__(self, coordinates, time, geohash=None, bbox=None):
         self.coordinates = coordinates
         self.time = time
-        print(self.time)
+        logger.debug(f"Location time: {self.time}")
         self.geohash = self.create_geohash(coordinates)
         self.bbox = convert_coords_to_bbox(coordinates[0], coordinates[1])
-        print(self.bbox)
+        logger.debug(f"Location bbox: {self.bbox}")
     def create_geohash(self, coordinates):
         geohash = pgh.encode(latitude=coordinates[0], longitude=coordinates[1])
         return geohash
@@ -353,9 +353,9 @@ def create_locations(amount=135, progress_tracker=None):
     start_entry = 0
     if progress_tracker:
         start_entry = progress_tracker.get_resume_point()
-        print(f"Resuming from entry {start_entry}")
+        logger.info(f"Resuming from entry {start_entry}")
 
-    print(f"Creating locations from {start_entry} to {start_entry + amount}")
+    logger.info(f"Creating locations from {start_entry} to {start_entry + amount}")
 
     # Process 'amount' number of locations starting from start_entry
     for entry in range(start_entry, start_entry + amount):
@@ -364,7 +364,7 @@ def create_locations(amount=135, progress_tracker=None):
 
         # Skip if already processed (using geohash as unique ID)
         if progress_tracker and progress_tracker.should_skip_location(location.geohash, 0):
-            print(f"Skipping already processed location: {location.geohash}")
+            logger.info(f"Skipping already processed location: {location.geohash}")
             # Still update the current index even when skipping
             if progress_tracker:
                 progress_tracker.update_current_event_index(entry + 1)
@@ -394,7 +394,7 @@ def validate_query(target, auth):
     }
     url = "https://sh.dataspace.copernicus.eu/api/v1/catalog/1.0.0/search"
     response = requests.post(url, json=data, headers=auth)
-    print(response.content)
+    logger.debug(f"Response content: {response.content}")
 
 def copernicus_query(use_gcs=False, amount=135):
     """Queries Sentinel-2 and Sentinel-1 data from the Copernicus Data Space Ecosystem.
@@ -426,7 +426,7 @@ def copernicus_query(use_gcs=False, amount=135):
 
     locations = create_locations(amount=amount, progress_tracker=progress_tracker)
 
-    print(f"Will process {len(locations)} unprocessed locations")
+    logger.info(f"Will process {len(locations)} unprocessed locations")
 
     # Example code how to query copernicus sentiel 2 data and do explcit image processing evals with inline script.
     # Currently reading from the eo_net wildfire json file.
@@ -489,15 +489,15 @@ def copernicus_query(use_gcs=False, amount=135):
                 write_image(response, metadata=request, location=location, use_gcs=use_gcs)
                 # Mark location as completed
                 progress_tracker.update_event_progress(location.geohash, location_index=0, status="completed")
-                print(f"Completed location {location.geohash}")
+                logger.info(f"Completed location {location.geohash}")
             else:
                 # Mark location as failed
                 progress_tracker.update_event_progress(location.geohash, location_index=0, status="failed")
-                print(f"{response.status_code}: error in request for {location.geohash}, outputting content for debugging {response.content}")
+                logger.error(f"{response.status_code}: error in request for {location.geohash}, outputting content for debugging {response.content}")
         except Exception as e:
             # Mark location as failed on any exception
             progress_tracker.update_event_progress(location.geohash, location_index=0, status="failed")
-            print(f"Exception processing location {location.geohash}: {e}")
+            logger.error(f"Exception processing location {location.geohash}: {e}")
 
 def batch_data_downloader_selenium(url=None, max_pages=9):
     """Downloads images from a Flickr album using Selenium.
@@ -535,10 +535,10 @@ def batch_data_downloader_selenium(url=None, max_pages=9):
                     filepath = os.path.join(destination, f'image_{downloaded}.jpg')
                     with open(filepath, 'wb') as f:
                         f.write(response.content)
-                    print(f"Downloaded: {filepath}")
+                    logger.info(f"Downloaded: {filepath}")
                     downloaded += 1
                 except Exception as e:
-                    print(f"Error: {e}")
+                    logger.error(f"Error downloading image: {e}")
         # Check if we've reached the bottom
         new_height = driver.execute_script("return document.body.scrollHeight")
         if new_height == last_height:
