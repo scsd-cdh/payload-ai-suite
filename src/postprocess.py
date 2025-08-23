@@ -348,8 +348,8 @@ def test_ccds():
         original_file = output_path / f"original_{nef_file.stem}.png"
         Image.fromarray(rgb_small).save(original_file)
 
-        # Test compression - slightly more generous settings
-        config = CCDSConfig(max_size=15000, wavelet_levels=2, bit_planes=8)
+        # Test compression, can tweak
+        config = CCDSConfig(max_size=15000, wavelet_levels=3, bit_planes=8)
         
         # Compression
         compressed = rgb_compression(rgb_small, config)
