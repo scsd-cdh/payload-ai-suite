@@ -7,6 +7,10 @@ import requests
 import json
 import time
 import os
+import random
+
+from selenium.common import NoSuchElementException
+
 from mlops import GCSHandler
 from datetime import datetime
 from paths import resolve_path
@@ -19,6 +23,10 @@ import pandas as pd
 import pygeohash as pgh
 from selenium import webdriver
 from selenium.webdriver.common.by import By
+from selenium import webdriver
+from selenium.webdriver.support.ui import WebDriverWait
+from selenium.webdriver.support import expected_conditions as EC
+from selenium.common.exceptions import NoSuchElementException, TimeoutException
 from pyproj import Proj, Transformer
 
 from PIL import Image
@@ -499,51 +507,120 @@ def copernicus_query(use_gcs=False, amount=135):
             progress_tracker.update_event_progress(location.geohash, location_index=0, status="failed")
             logger.error(f"Exception processing location {location.geohash}: {e}")
 
+
 def batch_data_downloader_selenium(url=None, max_pages=9):
-    """Downloads images from a Flickr album using Selenium.
-
-    Args:
-        url (str, optional): URL of the Flickr album. Defaults to a hardcoded URL.
-        max_pages (int, optional): Maximum number of pages to scrape. Defaults to 9.
-
-    Returns:
-        int: The number of images downloaded.
-    """
-    # TODO: Hardcoded url for now, if needed expose this for customization
-    url = "https://www.flickr.com/photos/esa_events/albums/72157716491073681/"
+    """Downloads images from a Flickr album using Selenium."""
+    url = url or "https://www.flickr.com/photos/esa_events/albums/72157716491073681/"
     destination = "../data/labeled/no"
-    driver = webdriver.Chrome()  # Make sure you have chromedriver installed
-    driver.get(url)
-    downloaded = 0
-    last_height = driver.execute_script("return document.body.scrollHeight")
+    os.makedirs(destination, exist_ok=True)
 
-    # TODO: figure out how to go past 100
-    # either pagination or rate limit
-    # might need to retrieve next page element.
-    while True:
-        # Scroll down
-        driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
-        time.sleep(2)  # Wait for images to load
-        # Get all image elements
-        images = driver.find_elements(By.TAG_NAME, 'img')
-        # Download new images
-        for img in images[downloaded:]:
-            src = img.get_attribute('src')
-            if src and src.startswith('http'):
-                try:
-                    response = requests.get(src)
-                    filepath = os.path.join(destination, f'image_{downloaded}.jpg')
-                    with open(filepath, 'wb') as f:
-                        f.write(response.content)
-                    logger.info(f"Downloaded: {filepath}")
-                    downloaded += 1
-                except Exception as e:
-                    logger.error(f"Error downloading image: {e}")
-        # Check if we've reached the bottom
-        new_height = driver.execute_script("return document.body.scrollHeight")
-        if new_height == last_height:
+    driver = webdriver.Chrome()
+    wait = WebDriverWait(driver, 15)
+    driver.get(url)
+
+    # Track unique image URLs so we don't rely on per-page indices
+    seen = set()
+    downloaded = 0
+
+    def human_pause(a=1.2, b=2.4):
+        time.sleep(random.uniform(a, b))
+
+    def scroll_to_load_all_thumbs():
+        # Keep scrolling until no more new height appears (lazy-load grid)
+        last_height = driver.execute_script("return document.body.scrollHeight")
+        while True:
+            driver.execute_script("window.scrollTo(0, document.body.scrollHeight);")
+            human_pause(1.0, 2.2)
+            new_height = driver.execute_script("return document.body.scrollHeight")
+            if new_height == last_height:
+                break
+            last_height = new_height
+
+    def collect_photo_srcs_on_page():
+        # Prefer real photo hosts to avoid logos/avatars
+        imgs = driver.find_elements(By.CSS_SELECTOR, 'img[src*="live.staticflickr.com"]')
+        srcs = []
+        for img in imgs:
+            src = img.get_attribute("src")
+            if src and src.startswith("http"):
+                srcs.append(src)
+        return srcs
+
+    def save_image(src, idx):
+        try:
+            r = requests.get(src, timeout=20)
+            r.raise_for_status()
+            filepath = os.path.join(destination, f"image_{idx}.jpg")
+            with open(filepath, "wb") as f:
+                f.write(r.content)
+            print(f"Downloaded: {filepath}")
+            return True
+        except Exception as e:
+            print(f"Download error for {src}: {e}")
+            return False
+
+    def click_next_page():
+        try:
+            next_btn = driver.find_element(By.CSS_SELECTOR, 'a[rel="next"]')
+        except NoSuchElementException:
+            return False
+
+        # Pick something that will disappear on navigation
+        try:
+            grid = driver.find_element(By.CSS_SELECTOR, 'div.view.photo-list-view')
+        except NoSuchElementException:
+            grid = None
+
+        driver.execute_script("arguments[0].scrollIntoView({block:'center'});", next_btn)
+        human_pause(0.8, 1.6)
+        next_btn.click()
+
+        try:
+            if grid:
+                wait.until(EC.staleness_of(grid))
+            else:
+                wait.until(EC.staleness_of(next_btn))
+        except TimeoutException:
+            human_pause(2.0, 3.5)  # fallback
+
+        return True
+
+    # Main paging loop
+    for page_idx in range(1, max_pages + 1):
+        print(f"== Page {page_idx} ==")
+
+        # Ensure thumbs are fully lazy-loaded before collecting
+        scroll_to_load_all_thumbs()
+
+        # Collect candidate image URLs
+        srcs = collect_photo_srcs_on_page()
+
+        # Process new ones only
+        new_on_page = 0
+        for src in srcs:
+            if src in seen:
+                continue
+            if save_image(src, downloaded):
+                seen.add(src)
+                downloaded += 1
+                new_on_page += 1
+                human_pause(0.4, 1.2)
+
+                if downloaded % 20 == 0:
+                    print("Cooling off briefly…")
+                    human_pause(6.0, 11.0)
+
+        print(f"Found {len(srcs)} thumbs, saved {new_on_page} new (total {downloaded}).")
+
+        if not click_next_page():
+            print("No more pages.")
             break
-        last_height = new_height
+
+        human_pause(2.5, 5.0)
+        if page_idx % 3 == 0:
+            print("Taking a longer page-level pause…")
+            human_pause(8.0, 14.0)
+
     driver.quit()
     return downloaded
 
