@@ -1,7 +1,7 @@
 import subprocess
 import os
 import logging
-from typing import List, Optional
+from typing import List, Optional, Tuple
 from pydantic import BaseModel, Field
 import numpy as np
 from numpy.typing import NDArray
