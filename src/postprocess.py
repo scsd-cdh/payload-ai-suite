@@ -199,8 +199,7 @@ def ccds_compression_channel(image_channel: NDArray[np.uint8], config: CCDSConfi
         
         if len(compressed_data) >= config.max_size:
             break
-    
-    print(f"  Encoded {len(encoded_planes)} bit planes, header size: {header_size}")
+
     return bytes(compressed_data), headers, encoded_planes
 
 def ccds_decompression_channel(compressed_data: bytes, config: CCDSConfig) -> NDArray[np.uint8]:
@@ -217,7 +216,6 @@ def ccds_decompression_channel(compressed_data: bytes, config: CCDSConfig) -> ND
         offset += SubbandHeader.size()
     
     header_size = offset
-    print(f"  Header size: {header_size}, {num_subbands} subbands")
     
     # Initialize subbands
     reconstructed_subbands = []
@@ -291,7 +289,6 @@ def rgb_compression(image_rgb: NDArray[np.uint8], config: Optional[CCDSConfig] =
     all_compressed = bytearray()
     
     for i, channel in enumerate(channels):
-        print(f"Compressing channel {i}...")
         compressed, headers, encoded_planes = ccds_compression_channel(channel, channel_config)
         
         # Pad to exact channel size for easier splitting during decompression
@@ -300,7 +297,6 @@ def rgb_compression(image_rgb: NDArray[np.uint8], config: Optional[CCDSConfig] =
             channel_data.append(0)
         
         all_compressed.extend(channel_data[:channel_size])
-        print(f"  Channel {i}: {len(compressed)} bytes")
     
     return bytes(all_compressed)
 
@@ -321,8 +317,6 @@ def rgb_decompression(compressed_data: bytes, image_shape: Tuple[int, int, int],
         start = i * channel_size
         end = start + channel_size
         channel_data = compressed_data[start:end]
-        
-        print(f"Decompressing channel {i}...")
         reconstructed = ccds_decompression_channel(channel_data, channel_config)
         channels.append(reconstructed)
     
@@ -346,7 +340,6 @@ def test_ccds():
         # Use a reasonable test size
         test_size = (128, 128)
         rgb_small = np.array(Image.fromarray(rgb).resize(test_size))
-        print(f"Test image shape: {rgb_small.shape}")
 
         # Save original
         original_file = output_path / f"original_{nef_file.stem}.png"
@@ -355,10 +348,10 @@ def test_ccds():
         # Test compression - slightly more generous settings
         config = CCDSConfig(max_size=15000, wavelet_levels=2, bit_planes=8)
         
-        print("Compressing...")
+        # Compression
         compressed = rgb_compression(rgb_small, config)
         
-        print("Decompressing...")
+        # Decompression
         decoded_rgb = rgb_decompression(compressed, rgb_small.shape, config)
         
         # Save results
