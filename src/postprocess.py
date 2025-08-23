@@ -25,6 +25,28 @@ class CCDSConfig(BaseModel):
     wavelet_levels: int = Field(default=3, description="Number of wavelet decomposition levels")
     bit_planes: int = Field(default=8, description="Number of bit planes to encode")
 
+class SubbandHeader:
+    """Header information for each subband."""
+    def __init__(self, shape: Tuple[int, int], min_val: float, max_val: float):
+        self.shape = shape
+        self.min_val = min_val
+        self.max_val = max_val
+        
+    def to_bytes(self) -> bytes:
+        """Serialize header to bytes."""
+        return struct.pack('!HHdd', self.shape[0], self.shape[1], self.min_val, self.max_val)
+    
+    @classmethod
+    def from_bytes(cls, data: bytes) -> 'SubbandHeader':
+        """Deserialize header from bytes."""
+        h, w, min_val, max_val = struct.unpack('!HHdd', data)
+        return cls((h, w), min_val, max_val)
+    
+    @classmethod
+    def size(cls) -> int:
+        """Size of header in bytes."""
+        return struct.calcsize('!HHdd')
+
 def export_avif(input_image: str, config: Optional[AVIFConfig] = None) -> bool:
     """Export an image to AVIF format using avifenc."""
     if config is None:
@@ -65,28 +87,6 @@ def perform_dwt(image_data: NDArray[np.uint8], levels: int) -> List[NDArray]:
         subbands.extend([HL, LH, HH])
     
     return subbands
-
-class SubbandHeader:
-    """Header information for each subband."""
-    def __init__(self, shape: Tuple[int, int], min_val: float, max_val: float):
-        self.shape = shape
-        self.min_val = min_val
-        self.max_val = max_val
-        
-    def to_bytes(self) -> bytes:
-        """Serialize header to bytes."""
-        return struct.pack('!HHdd', self.shape[0], self.shape[1], self.min_val, self.max_val)
-    
-    @classmethod
-    def from_bytes(cls, data: bytes) -> 'SubbandHeader':
-        """Deserialize header from bytes."""
-        h, w, min_val, max_val = struct.unpack('!HHdd', data)
-        return cls((h, w), min_val, max_val)
-    
-    @classmethod
-    def size(cls) -> int:
-        """Size of header in bytes."""
-        return struct.calcsize('!HHdd')
 
 def quantize_coefficients(coeffs: NDArray) -> Tuple[NDArray[np.uint16], float, float]:
     """Quantize wavelet coefficients to 16-bit unsigned integers."""
@@ -348,8 +348,8 @@ def test_ccds():
         original_file = output_path / f"original_{nef_file.stem}.png"
         Image.fromarray(rgb_small).save(original_file)
 
-        # Test compression
-        config = CCDSConfig(max_size=12000, wavelet_levels=2, bit_planes=8)
+        # Test compression - slightly more generous settings
+        config = CCDSConfig(max_size=15000, wavelet_levels=2, bit_planes=8)
         
         print("Compressing...")
         compressed = rgb_compression(rgb_small, config)
@@ -361,17 +361,12 @@ def test_ccds():
         decoded_file = output_path / f"decoded_{nef_file.stem}.png"
         Image.fromarray(decoded_rgb).save(decoded_file)
 
-        # Statistics
+        # Calculate quality metrics
         original_bytes = rgb_small.nbytes
         compressed_bytes = len(compressed)
         
         print(f"Results:")
         print(f"  Original: {original_bytes} bytes")
         print(f"  Compressed: {compressed_bytes} bytes") 
-        print(f"  Ratio: {original_bytes/compressed_bytes:.2f}:1")
-        print(f"  Files: {original_file.name}, {decoded_file.name}")
-        print()
-        
-        break  # Test first image only
 
 test_ccds()
