@@ -26,25 +26,25 @@ class CCDSConfig(BaseModel):
     bit_planes: int = Field(default=8, description="Number of bit planes to encode")
 
 class SubbandHeader:
-    """Header information for each subband."""
+    """Header information for each subband"""
     def __init__(self, shape: Tuple[int, int], min_val: float, max_val: float):
         self.shape = shape
         self.min_val = min_val
         self.max_val = max_val
         
     def to_bytes(self) -> bytes:
-        """Serialize header to bytes."""
+        """Serialize header to bytes"""
         return struct.pack('!HHdd', self.shape[0], self.shape[1], self.min_val, self.max_val)
     
     @classmethod
     def from_bytes(cls, data: bytes) -> 'SubbandHeader':
-        """Deserialize header from bytes."""
+        """Deserialize header from bytes"""
         h, w, min_val, max_val = struct.unpack('!HHdd', data)
         return cls((h, w), min_val, max_val)
     
     @classmethod
     def size(cls) -> int:
-        """Size of header in bytes."""
+        """Size of header in bytes"""
         return struct.calcsize('!HHdd')
 
 def export_avif(input_image: str, config: Optional[AVIFConfig] = None) -> bool:
@@ -68,7 +68,7 @@ def export_avif(input_image: str, config: Optional[AVIFConfig] = None) -> bool:
     return True
 
 def perform_dwt(image_data: NDArray[np.uint8], levels: int) -> List[NDArray]:
-    """Perform multi-level 2D Discrete Wavelet Transform."""
+    """Perform multi-level 2D Discrete Wavelet Transform"""
     # Convert to float for wavelet transform
     float_data = image_data.astype(np.float64)
     
@@ -78,7 +78,7 @@ def perform_dwt(image_data: NDArray[np.uint8], levels: int) -> List[NDArray]:
     # Extract subbands in order: LL3, HL3, LH3, HH3, HL2, LH2, HH2, HL1, LH1, HH1
     subbands = []
     
-    # Add the LL (approximation) coefficients
+    # Add the LL coefficients
     subbands.append(coeffs[0])
     
     # Add detail coefficients from coarse to fine
@@ -89,7 +89,8 @@ def perform_dwt(image_data: NDArray[np.uint8], levels: int) -> List[NDArray]:
     return subbands
 
 def quantize_coefficients(coeffs: NDArray) -> Tuple[NDArray[np.uint16], float, float]:
-    """Quantize wavelet coefficients to 16-bit unsigned integers."""
+    """Maps floating-point wavelet coefficients to 16-bit unsigned integers"""
+    """(prepping for bit-plane encoding)"""
     min_val = float(np.min(coeffs))
     max_val = float(np.max(coeffs))
     
@@ -113,8 +114,11 @@ def dequantize_coefficients(quantized: NDArray[np.uint16], min_val: float, max_v
 
 def encode_bit_plane(coeffs: NDArray[np.uint16], bit_plane: int) -> bytes:
     """Encode a specific bit plane."""
-    # Extract bit plane
+    # Create a mask that has a 1 only in the desired bit position
     bit_mask = 1 << bit_plane
+    
+    # Use bitwise AND to isolate just that one bit in each value
+    # Shift that bit down so it's either 0 or 1
     bits = (coeffs & bit_mask) >> bit_plane
     
     # Pack bits into bytes
