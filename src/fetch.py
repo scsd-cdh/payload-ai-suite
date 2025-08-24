@@ -142,7 +142,7 @@ def nasa_firms_api():
     "VIIRS_NOAA20_NRT", # corresponds to VJ114IMGT_NRT.002
     ]
     
-    dfs = []
+    data_frames = []
     
     for sensor in SENSORS:
         try:
