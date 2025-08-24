@@ -152,7 +152,7 @@ def nasa_firms_api():
             
             df = fetch_sensor_data(sensor, time_range=1)
             if df is not None:
-                dfs.append(df)
+                data_frames.append(df)
         except Exception as e:
             logger.error(f"Error fetching data for {sensor}: {e}")
             
