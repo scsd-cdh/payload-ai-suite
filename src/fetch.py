@@ -182,7 +182,7 @@ def fetch_sensor_data(sensor, time_range) -> pd.DataFrame:
     NASA_KEY = os.getenv("NASA_KEY")
     
     if not NASA_KEY:
-        raise RuntimeError("Please set NASA_KEY in your .env file.")
+        raise RuntimeError("Please set NASA_KEY in your local environment.")
     
     url = (
         f"https://firms.modaps.eosdis.nasa.gov/"
