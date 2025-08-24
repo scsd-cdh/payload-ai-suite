@@ -156,7 +156,7 @@ def nasa_firms_api():
         except Exception as e:
             logger.error(f"Error fetching data for {sensor}: {e}")
             
-    all_filtered_fires = pd.concat(dfs, ignore_index=True)  
+    all_filtered_fires = pd.concat(data_frames, ignore_index=True)  
     
     json_file_name = "./events/firms/events_{}.json".format(datetime.now().strftime("%Y%m%d")) 
     
