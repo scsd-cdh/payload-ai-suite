@@ -190,7 +190,7 @@ def fetch_sensor_data(sensor, time_range) -> pd.DataFrame:
     )
     
     logger.info(f"Fetching data for sensor: {sensor}")    
-    print(f"Fetching data for sensor: {sensor}")
+    
     
     fires_df = pd.read_csv(url)
     
