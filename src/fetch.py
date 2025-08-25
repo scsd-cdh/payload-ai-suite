@@ -375,7 +375,7 @@ def write_image( response, metadata, source: Source, location=None, use_gcs=Fals
                 # For FIRMS, save as PNG
                 directory = "../data/firms_fire_events"
                 os.makedirs(directory, exist_ok=True)
-                filename = f"{directory}/{location.geohash}.png"
+                filename = f"{directory}/{location.geohash}.{output_format}"
             elif source == Source.EONET:
                 directory = "../data/eonet_fire_events"
                 os.makedirs(directory, exist_ok=True)
