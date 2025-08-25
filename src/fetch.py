@@ -182,7 +182,7 @@ def fetch_sensor_data(sensor, time_range) -> pd.DataFrame:
     NASA_KEY = os.getenv("NASA_KEY")
     
     if not NASA_KEY:
-        raise RuntimeError("Please set NASA_KEY in your local environment.")
+        raise RuntimeError("Please set NASA_KEY in your .env file.")
     
     url = (
         f"https://firms.modaps.eosdis.nasa.gov/"
@@ -373,11 +373,11 @@ def write_image( response, metadata, source: Source, location=None, use_gcs=Fals
             # Save locally
             if source == Source.FIRMS:
                 # For FIRMS, save as PNG
-                directory = "./data/firms_fire_events"
+                directory = "../data/firms_fire_events"
                 os.makedirs(directory, exist_ok=True)
                 filename = f"{directory}/{location.geohash}.png"
             elif source == Source.EONET:
-                directory = "./data/eonet_fire_events"
+                directory = "../data/eonet_fire_events"
                 os.makedirs(directory, exist_ok=True)
                 filename = f"{directory}/{location.geohash}.{output_format}"
 
