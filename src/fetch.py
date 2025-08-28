@@ -345,14 +345,11 @@ def write_image( response, metadata, source: Source, location=None, use_gcs=Fals
             # Upload to GCS
 
             try:
-                if source == Source.FIRMS:
-                    logger.warning("GCS upload for FIRMS data is not yet supported. Please adapt the GCS bucket structure for FIRMS dataset.")
-                else:
                     gcs = GCSHandler()
 
                     # Create GCS path
                     date_str = datetime.now().strftime('%Y%m%d')
-                    gcs_path = f"raw_data/eonet/to_process/{date_str}/{location.geohash}.{output_format}"
+                    gcs_path = f"raw_data/{source}/to_process/{date_str}/{location.geohash}.{output_format}"
 
                     # Get content type
                     content_type = metadata.get('output', {}).get('format', 'image/png')
