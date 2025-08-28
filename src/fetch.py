@@ -345,22 +345,22 @@ def write_image( response, metadata, source: Source, location=None, use_gcs=Fals
             # Upload to GCS
 
             try:
-                    gcs = GCSHandler()
+                gcs = GCSHandler()
 
-                    # Create GCS path
-                    date_str = datetime.now().strftime('%Y%m%d')
-                    gcs_path = f"raw_data/{source}/to_process/{date_str}/{location.geohash}.{output_format}"
+                # Create GCS path
+                date_str = datetime.now().strftime('%Y%m%d')
+                gcs_path = f"raw_data/{source}/to_process/{date_str}/{location.geohash}.{output_format}"
 
-                    # Get content type
-                    content_type = metadata.get('output', {}).get('format', 'image/png')
+                # Get content type
+                content_type = metadata.get('output', {}).get('format', 'image/png')
 
-                    # Upload bytes directly
-                    success = gcs.upload_bytes(response.content, gcs_path, content_type=content_type)
+                # Upload bytes directly
+                success = gcs.upload_bytes(response.content, gcs_path, content_type=content_type)
 
-                    if success:
-                        logger.info(f"Image successfully uploaded to gs://{gcs.bucket_name}/{gcs_path}")
-                    else:
-                        logger.error(f"Failed to upload image to GCS")
+                if success:
+                    logger.info(f"Image successfully uploaded to gs://{gcs.bucket_name}/{gcs_path}")
+                else:
+                    logger.error(f"Failed to upload image to GCS")
 
             except Exception as e:
                 logger.error(f"GCS upload failed: {str(e)}")
