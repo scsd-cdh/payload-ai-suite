@@ -203,7 +203,7 @@ def fetch_sensor_data(sensor, time_range) -> pd.DataFrame:
     fires_df["SOURCE"]  = sensor
     fires_df["DAY_RANGE"] = time_range
     
-    fires_filtered_df = fires_df[["SOURCE", "DAY_RANGE", "latitude", "longitude", "acq_date", "acq_time","confidence", "instrument"]].copy()
+    fires_filtered_df = fires_df[["SOURCE", "DAY_RANGE", "latitude", "longitude", "acq_date", "acq_time", "confidence", "instrument"]].copy()
 
     return fires_filtered_df
     
