@@ -200,7 +200,7 @@ def fetch_sensor_data(sensor, time_range) -> pd.DataFrame:
         raise ValueError(f"No data found for sensor: {sensor} with time range: {time_range}")
     
     # inject SOURCE and DAY_RANGE
-    fires_df["SOURCE"]    = sensor
+    fires_df["SOURCE"]  = sensor
     fires_df["DAY_RANGE"] = time_range
     
     fires_filtered_df = fires_df[["SOURCE", "DAY_RANGE", "latitude", "longitude", "acq_date", "acq_time","confidence", "instrument"]].copy()
