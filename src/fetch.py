@@ -1,6 +1,4 @@
 """Utilities for fetching data for the model
-- Selenium based flickr webscraper
-- EONET wildfire cross reference tool
 """
 
 from pathlib import Path
@@ -10,7 +8,7 @@ import time
 import os
 from mlops import GCSHandler
 from datetime import datetime
-from paths import resolve_path
+from paths import resolve_path, get_eonet_dir, get_data_dir, get_firms_dir
 from enum import Enum
 
 
@@ -44,12 +42,14 @@ class Source(Enum):
 
 
 class ProgressTracker:
-    """Tracks progress of EONET data scraping at event and location level."""
+    """Tracks progress of location processing across different data sources (EONET, FIRMS, etc)."""
 
     # Legacy workflow starts at event 125
     LEGACY_START_INDEX = 125
 
-    def __init__(self, filepath='./progress_counter/eonet.json'):
+    def __init__(self, filepath=None):
+        if filepath is None:
+            filepath = resolve_path('progress_counter/locations_ledger.json')
         self.filepath = filepath
         self.progress = self._load_progress()
 
@@ -159,10 +159,13 @@ def nasa_firms_api():
     json_file_name = "./events/firms/events_{}.json".format(datetime.now().strftime("%Y%m%d"))
 
     # Ensure the directory exists
-    if not os.path.exists("events/firms"):
-        os.makedirs("events/firms")
+    firms_dir = resolve_path("events/firms")
+    os.makedirs(firms_dir, exist_ok=True)
 
+    json_file_name = os.path.join(firms_dir, "events_{}.json".format(datetime.now().strftime("%Y%m%d")))
     all_filtered_fires.to_json(json_file_name, orient="records")
+
+    return all_filtered_fires
 
 
 def fetch_sensor_data(sensor, time_range) -> pd.DataFrame:
@@ -193,7 +196,7 @@ def fetch_sensor_data(sensor, time_range) -> pd.DataFrame:
     fires_df = pd.read_csv(url)
 
     # Check if the DataFrame is empty
-    if fires_df is None:
+    if fires_df.empty:
         logger.warning(f"No data found for sensor: {sensor} with time range: {time_range}")
         raise ValueError(f"No data found for sensor: {sensor} with time range: {time_range}")
 
@@ -246,11 +249,19 @@ def retrieve_eonet_cross_reference():
     wildfire_url = "https://eonet.gsfc.nasa.gov/api/v3/categories/wildfires"
     response = requests.get(url=wildfire_url)
     data = response.json()
-    with open('./events/categories.json', 'w', encoding='utf-8') as f:
+
+    # Ensure events directory exists
+    events_dir = resolve_path("events")
+    os.makedirs(events_dir, exist_ok=True)
+
+    categories_path = os.path.join(events_dir, "categories.json")
+    with open(categories_path, 'w', encoding='utf-8') as f:
          json.dump(data, f, ensure_ascii=False, indent=4)
 
 
-def extract_eonet_coordinates(file_path='./events/categories.json'):
+def extract_eonet_coordinates(file_path=None):
+    if file_path is None:
+        file_path = resolve_path('events/categories.json')
     """Extracts coordinates from the EONET categories JSON file.
 
     Args:
@@ -280,7 +291,9 @@ def extract_eonet_coordinates(file_path='./events/categories.json'):
         logger.error(f"Error extracting coordinates: {e}")
         return None
 
-def extract_time_ranges_from_eonet(file_path='./events/categories.json'):
+def extract_time_ranges_from_eonet(file_path=None):
+    if file_path is None:
+        file_path = resolve_path('events/categories.json')
     """Extracts time ranges from the EONET categories JSON file and converts them to the required format.
 
     Args:
@@ -367,14 +380,14 @@ def write_image( response, metadata, source: Source, location=None, use_gcs=Fals
         else:
             # Save locally
             if source == Source.FIRMS:
-                # For FIRMS, save as PNG
-                directory = "../data/firms_fire_events"
+                # For FIRMS, save to firms directory
+                directory = get_firms_dir()
                 os.makedirs(directory, exist_ok=True)
-                filename = f"{directory}/{location.geohash}.{output_format}"
+                filename = os.path.join(directory, f"{location.geohash}.{output_format}")
             elif source == Source.EONET:
-                directory = "../data/eonet_fire_events"
+                directory = get_eonet_dir()
                 os.makedirs(directory, exist_ok=True)
-                filename = f"{directory}/{location.geohash}.{output_format}"
+                filename = os.path.join(directory, f"{location.geohash}.{output_format}")
 
             # Write the response content data to a image file
             with open(filename, 'wb') as f:
@@ -420,7 +433,7 @@ class Location:
         geohash = pgh.encode(latitude=coordinates[0], longitude=coordinates[1])
         return geohash
 
-def extract_firms_data(file_path="./events/firms"):
+def extract_firms_data(file_path=None):
     """Extracts both time ranges and coordinates from the FIRMS data.
 
     This function processes the FIRMS database and extracts time ranges and coordinates
@@ -432,6 +445,8 @@ def extract_firms_data(file_path="./events/firms"):
             - coordinates (list): [[lon, lat], [lon, lat], ...]
     """
     try:
+        if file_path is None:
+            file_path = resolve_path("events/firms")
         folder = Path(file_path).resolve()
 
         # Concatenate all JSON files in the folder
@@ -673,7 +688,7 @@ def batch_data_downloader_selenium(url=None, max_pages=9):
     """
     # TODO: Hardcoded url for now, if needed expose this for customization
     url = "https://www.flickr.com/photos/esa_events/albums/72157716491073681/"
-    destination = "../data/labeled/no"
+    destination = resolve_path("data/labeled/no")
     driver = webdriver.Chrome()  # Make sure you have chromedriver installed
     driver.get(url)
     downloaded = 0
