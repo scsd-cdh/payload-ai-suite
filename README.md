@@ -8,14 +8,17 @@ Collection of software tools for multispectral image analysis and model testing.
 - Optional NIR channel support for RGB-NIR 4 channel tensor model.
 - Cloud mask preprocessing to check cloud coverage threshold before wildfire inference.
 - Image compression for satellite downlinking (AVIF and CCDS formats)
+- NASA FIRMS integration for real-time fire data retrieval
+- Sen2Fire dataset support for enhanced training data
+- Multimodal quality control using Gemini 2.0 Flash
+- Google Cloud Storage integration for scalable data management
+- Automated cleanup utilities for dataset maintenance
+- Progress tracking for batch processing operations
 
 # Mission Goals
 The underlying goal of this project is to illustrate the use of an embedded AI classification model for onboard wildfire detection. The inference provided by the model enables us to discard erroneous images and selectively downlink only successful captures.
 
 Our operational goal is to detect medium fires (10-1,000 acres). These events represent a critical transition phase where intervention is still effective, but urgency is high. This targeted monitoring fills the gap between in-situ ground methods and “big players” like MODIS and VIIRS. Given our quality control calculations, medium fire targets are well within our system's capabilities. By reducing false positives, we aim to increase stakeholder confidence in alerts.
-
-# System Workflow
-![Payload AI Suite Workflow](assets/workflow_diagram.png)
 
 # Preprocess Methodology
 For effective wildfire detection, we are using a multispectral RGB-NIR camera from Spectral Devices. This choice is based on the fact that the visible light spectrum (i.e., RGB) shares the same limitations as the human visual system when directly detecting fires. Incidental smoke severely limits the visual contrast of active flames, and fire emits far more energy in the IR spectrum.
@@ -52,22 +55,32 @@ The project is organized as follows:
 
 ```
 payload-ai-suite/
-├── fetch.py                # Core utilities for data fetching (e.g., NASA FIRMS, Copernicus API, EONET).
-├── main.py                 # CLI entry point for running tools and workflows.
-├── model.py                # VGG-based wildfire classification model implementation.
-├── preprocess.py           # Preprocessing utilities for input data.
-├── mlops.py                # MLOps utilities including GCS integration and multimodal QC.
-├── cloud.py                # Cloud mask detection preprocessing for cloud coverage assessment.
+├── src/                    # Source code directory
+│   ├── main.py             # CLI entry point for running tools and workflows.
+│   ├── model.py            # VGG-based wildfire classification model implementation.
+│   ├── fetch.py            # Core utilities for data fetching (NASA FIRMS, Copernicus, EONET).
+│   ├── preprocess.py       # Preprocessing utilities for input data.
+│   ├── postprocess.py      # Image compression utilities (AVIF, CCDS formats).
+│   ├── mlops.py            # MLOps utilities including GCS integration and multimodal QC.
+│   ├── cloud.py            # Cloud mask detection preprocessing for cloud coverage assessment.
+│   ├── clean_up_files.py   # Utilities for cleaning duplicate and empty files.
+│   ├── paths.py            # Path management utilities for consistent file access.
+│   └── training_checkpoints/  # Model checkpoint storage
 ├── events/                 # Directory for storing event-related data.
 │   └── categories.json     # EONET wildfire events data.
 ├── data/                   # Directory for storing downloaded data (e.g., images, multispectral data).
-│   └── labeled/            # Training data directory
-│       ├── yes/            # Positive fire samples
-│       └── no/             # Negative (no-fire) samples
+│   ├── labeled/            # Training data directory
+│   │   ├── yes/            # Positive fire samples
+│   │   └── no/             # Negative (no-fire) samples
+│   ├── eonet_fire_events/  # EONET fire event imagery
+│   ├── nasa_firms/         # NASA FIRMS data
+│   └── sen2fire/           # Sen2Fire dataset
+├── models/                 # Pre-trained models directory
+│   └── zetane.onnx         # ONNX model for wildfire detection
+├── progress_counter/       # Progress tracking for data processing
 ├── requirements.txt        # Python dependencies for the project.
 ├── README.md               # Project documentation.
-├── CLAUDE.md               # Instructions for Claude Code AI assistant.
-└── .gitignore              # Git ignore file for excluding unnecessary files.
+└── CLAUDE.md               # Instructions for Claude Code AI assistant.
 ```
 
 # Environment Variables
@@ -76,6 +89,7 @@ The following environment variables are required for the project to function cor
 - `NASA_KEY`: Your NASA FIRMS API key for accessing wildfire data. Request one at https://firms.modaps.eosdis.nasa.gov/api/map_key/
 - `CLIENT_ID`: Client ID for Copernicus Data Space Ecosystem. Check out https://documentation.dataspace.copernicus.eu/APIs/SentinelHub/Overview/Authentication.html
 - `CLIENT_SECRET`: Client secret for Copernicus Data Space Ecosystem.
+- `GEMINI_API_KEY`: API key for Gemini 2.0 Flash, used for multimodal quality control checks.
 
 ## Google Cloud Storage (Optional)
 The project supports Google Cloud Storage for training data and image storage. If you don't have access to GCS:
@@ -106,7 +120,11 @@ The project provides a CLI interface via `main.py`. Use the following commands t
 
 ### General Usage
 ```bash
-uv run main.py [OPTIONS]
+# From the project root directory:
+python3 src/main.py [OPTIONS]
+
+# Or using uv:
+uv run src/main.py [OPTIONS]
 ```
 
 ### Available Options
@@ -121,7 +139,11 @@ uv run main.py [OPTIONS]
 - `--use-nir`: Enable the 4-channel (RGB+NIR) model (Note: Not supported when using `--use-gcs`)
 - `--use-gcs`: Stream training data from Google Cloud Storage
 - `--multimodal-qc`: Run multimodal quality control checks using Gemini 2.0
+- `--qc-path PATH`: Path to folder for QC processing (e.g., 'sen2fire/to_qc' or 'eonet_fire_events/to_process')
 - `--cloud-mask`: Export OmniCloudMask models to ONNX and test cloud coverage assessment on labeled data
+- `--process-sen2fire`: Convert Sen2Fire dataset to a state to be processed by the pipeline
+- `--upload-labeled`: Upload labeled data to GCS after running cleanup
+- `--download-labeled`: Download labeled data from GCS to local filesystem
 
 ### Examples
 1. **Run the wildfire classification model**:
