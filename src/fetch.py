@@ -134,38 +134,36 @@ def nasa_firms_api():
     Returns:
         pd.DataFrame: A DataFrame containing the data availability information for NASA FIRMS.
     """
-    # TODO: Implement AREA_COORDINATES and DAY_RANGE etc. parameters for API call
-    
-    #List of Sensors to Query
+    # List of Sensors to Query
     SENSORS = [
     "MODIS_NRT",        # corresponds to MCD14DL.NRT.0061
     "VIIRS_NOAA20_NRT", # corresponds to VJ114IMGT_NRT.002
     ]
-    
+
     data_frames = []
-    
+
     for sensor in SENSORS:
         try:
             # Fetch data for each sensor with a time range of 1 day
             # This will fetch data for the last 24 hours
             # You can adjust the time range as needed
-            
+
             df = fetch_sensor_data(sensor, time_range=1)
             if df is not None:
                 data_frames.append(df)
         except Exception as e:
             logger.error(f"Error fetching data for {sensor}: {e}")
-            
-    all_filtered_fires = pd.concat(data_frames, ignore_index=True)  
-    
-    json_file_name = "./events/firms/events_{}.json".format(datetime.now().strftime("%Y%m%d")) 
-    
+
+    all_filtered_fires = pd.concat(data_frames, ignore_index=True)
+
+    json_file_name = "./events/firms/events_{}.json".format(datetime.now().strftime("%Y%m%d"))
+
     # Ensure the directory exists
     if not os.path.exists("events/firms"):
         os.makedirs("events/firms")
-    
+
     all_filtered_fires.to_json(json_file_name, orient="records")
-    
+
 
 def fetch_sensor_data(sensor, time_range) -> pd.DataFrame:
     """
@@ -178,35 +176,35 @@ def fetch_sensor_data(sensor, time_range) -> pd.DataFrame:
     Returns:
         pd.DataFrame: A DataFrame containing the sensor data.
     """
-    
+
     NASA_KEY = os.getenv("NASA_KEY")
-    
+
     if not NASA_KEY:
         raise RuntimeError("Please set NASA_KEY in your .env file.")
-    
+
     url = (
         f"https://firms.modaps.eosdis.nasa.gov/"
         f"api/area/csv/{NASA_KEY}/{sensor}/world/{time_range}"
     )
-    
-    logger.info(f"Fetching data for sensor: {sensor}")    
-    
-    
+
+    logger.info(f"Fetching data for sensor: {sensor}")
+
+
     fires_df = pd.read_csv(url)
-    
+
     # Check if the DataFrame is empty
     if fires_df is None:
         logger.warning(f"No data found for sensor: {sensor} with time range: {time_range}")
         raise ValueError(f"No data found for sensor: {sensor} with time range: {time_range}")
-    
+
     # inject SOURCE and DAY_RANGE
     fires_df["SOURCE"]  = sensor
     fires_df["DAY_RANGE"] = time_range
-    
+
     fires_filtered_df = fires_df[["SOURCE", "DAY_RANGE", "latitude", "longitude", "acq_date", "acq_time", "confidence", "instrument"]].copy()
 
     return fires_filtered_df
-    
+
 
 
 def setup_auth():
@@ -459,14 +457,14 @@ def extract_firms_data(file_path="./events/firms"):
             lat = row.latitude
             coordinates.append([lon, lat])
         print(f"Extracted {len(time_ranges)} time ranges and {len(coordinates)} coordinates from FIRMS data.")
-            
+
 
         return time_ranges, [coordinates]
 
     except Exception as e:
         logger.error(f"Error extracting FIRMS data: {e}")
         return [], []
-        
+
 
 def create_locations( source:Source, amount=135, progress_tracker=None,):
     """Creates a list of Location objects based on data in event directory.
@@ -492,8 +490,8 @@ def create_locations( source:Source, amount=135, progress_tracker=None,):
         coordinates = extract_eonet_coordinates()
     elif source == Source.FIRMS:
         time_ranges, coordinates = extract_firms_data()
-         
-        
+
+
     print(f"Extracted {len(time_ranges)} {source} time ranges and {len(coordinates[0])} coordinates.")
 
 
@@ -569,25 +567,32 @@ def copernicus_query(use_gcs=False, amount=135):
     ACCESS_TOKEN = setup_auth()
     headers={f"Authorization" : f"Bearer {ACCESS_TOKEN}"}
     locations = {}
- 
+
 
     # Initialize progress tracker
     progress_tracker = ProgressTracker()
-    
+
     # Create locations from FIRMS data
-    firms_locations = create_locations(source=Source.FIRMS,amount=amount, progress_tracker=progress_tracker)
-    locations[Source.FIRMS]= firms_locations
-    
+    try:
+        firms_locations = create_locations(source=Source.FIRMS, amount=amount, progress_tracker=progress_tracker)
+        locations[Source.FIRMS]= firms_locations
+    except Exception as e:
+        logger.warning(f"{e}: FIRMS location creation failed. Have you run --nasa-firms yet?")
+
     # Create locations from EONET data
-    eonet_locations = create_locations(source=Source.EONET,amount=amount, progress_tracker=progress_tracker)
-    locations[Source.EONET] = eonet_locations
-    
+    try:
+        eonet_locations = create_locations(source=Source.EONET, amount=amount, progress_tracker=progress_tracker)
+        locations[Source.EONET] = eonet_locations
+    except Exception as e:
+        logger.warning(f"{e}: EONET location creation failed. Have you run --eonet-crossref yet?")
+
     logger.info(f"Will process {len(locations)} unprocessed locations")
 
+    if not locations:
+        logger.warning(f"No locations were created. Something went terribly wrong.")
+        return
+
     # Example code how to query copernicus sentiel 2 data and do explcit image processing evals with inline script.
-    # Currently reading from the eo_net wildfire json file.
-
-
     sensor = "sentinel-2-l2a"
 
     for source, locations in locations.items():
@@ -737,12 +742,12 @@ def convert_sen2fire_labeled(root_dir=None, output_dir=None, use_nir=False):
 
     for scene, label in scenes.items():
         scene_path = os.path.join(root_dir, scene)
-        
+
         # Check if scene directory exists
         if not os.path.exists(scene_path):
             logger.warning(f"Scene directory not found: {scene_path}")
             continue
-            
+
         try:
             npz_files = [f for f in os.listdir(scene_path) if f.endswith(".npz")] # collect all the .npz files in the folder
         except Exception as e:
@@ -755,7 +760,7 @@ def convert_sen2fire_labeled(root_dir=None, output_dir=None, use_nir=False):
                 data = np.load(fpath) # loading the data
                 img = data["image"]  # shape: (12, H, W) -- 13 bands with 512 x 512 patches
                 mask = data["label"]  # shape: (H, W)
-                
+
                 logger.debug(f"Processing {fname}: image shape {img.shape}, mask shape {mask.shape}")
 
                 # if fire is present if the pixel is 1
@@ -788,7 +793,7 @@ def convert_sen2fire_labeled(root_dir=None, output_dir=None, use_nir=False):
                 # Normalize to 0–255 for transferring into numpy img
                 img_min, img_max = img_crop.min(), img_crop.max()
                 logger.debug(f"Image value range before normalization: min={img_min}, max={img_max}")
-                
+
                 img_norm = (img_crop / img_crop.max()) * 255 # img content comes from img_norm array
                 img_norm = img_norm.astype(np.uint8) # image pixel values
                 logger.debug(f"After normalization: min={img_norm.min()}, max={img_norm.max()}")
