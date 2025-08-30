@@ -12,6 +12,9 @@ from fetch import (
     copernicus_query,
     convert_sen2fire_labeled
 )
+from postprocess import (
+    test_ccds
+)
 
 # Set up logging
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
@@ -61,6 +64,7 @@ if __name__ == "__main__":
     parser.add_argument('--cloud-mask', required=False, action='store_true', help="Export OmniCloudMask models to ONNX and test on labeled data")
     parser.add_argument('--upload-labeled', required=False, action='store_true', help="Upload labeled data to GCS after running cleanup")
     parser.add_argument('--download-labeled', required=False, action='store_true', help="Download labeled data from GCS to local filesystem")
+    parser.add_argument("--compress-image", required=False, type=str, help="Path to the input .NEF image")
 
     args = parser.parse_args()
     if args.run_model:
@@ -88,5 +92,7 @@ if __name__ == "__main__":
     elif args.download_labeled:
         import mlops
         mlops.download_labeled_from_gcs()
+    elif args.compress_image:
+        test_ccds(args.compress_image)
     else:
         logger.error("No valid arguments provided. Use -h for help.")
