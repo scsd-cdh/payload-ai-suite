@@ -64,6 +64,11 @@ def get_eonet_dir():
     return os.path.join(get_data_dir(), "eonet_fire_events")
 
 
+def get_firms_dir():
+    """Get path to FIRMS fire events directory."""
+    return os.path.join(get_data_dir(), "firms_fire_events")
+
+
 def get_sen2fire_dir():
     """Get path to Sen2Fire data directory."""
     return os.path.join(get_data_dir(), "sen2fire")
