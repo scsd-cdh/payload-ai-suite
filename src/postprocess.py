@@ -327,46 +327,48 @@ def rgb_decompression(compressed_data: bytes, image_shape: Tuple[int, int, int],
     rgb_result = np.stack(channels, axis=2)
     return rgb_result
 
-def test_ccds():
+def test_ccds(input_image_path: str):
     """Test CCDS compression."""
-    input_path = Path("raw-images")
+    image_path = Path(input_image_path)
     output_path = Path("output")
     output_path.mkdir(parents=True, exist_ok=True)
 
-    for nef_file in input_path.glob("*.NEF"):
-        print(f"Processing {nef_file.name}...")
-        
-        # Load and resize for testing
-        with rawpy.imread(str(nef_file)) as raw:
-            rgb = raw.postprocess()
+    # Check if the file exists
+    if not image_path.exists():
+        logger.error(f"File {input_image_path} does not exist.")
+        return
 
-        # Use a reasonable test size
-        test_size = (128, 128)
-        rgb_small = np.array(Image.fromarray(rgb).resize(test_size))
+    logger.info(f"Processing {image_path.name}...")
+    
+    # Load and resize for testing
+    with rawpy.imread(str(image_path)) as raw:
+        rgb = raw.postprocess()
 
-        # Save original
-        original_file = output_path / f"original_{nef_file.stem}.png"
-        Image.fromarray(rgb_small).save(original_file)
+    # Use a reasonable test size NOTE: can change later
+    test_size = (128, 128)
+    rgb_small = np.array(Image.fromarray(rgb).resize(test_size))
 
-        # Test compression, can tweak
-        config = CCDSConfig(max_size=15000, wavelet_levels=3, bit_planes=8)
-        
-        # Compression
-        compressed = rgb_compression(rgb_small, config)
-        
-        # Decompression
-        decoded_rgb = rgb_decompression(compressed, rgb_small.shape, config)
-        
-        # Save results
-        decoded_file = output_path / f"decoded_{nef_file.stem}.png"
-        Image.fromarray(decoded_rgb).save(decoded_file)
+    # Save original
+    original_file = output_path / f"original_{image_path.stem}.png"
+    Image.fromarray(rgb_small).save(original_file)
 
-        # Calculate quality metrics
-        original_bytes = rgb_small.nbytes
-        compressed_bytes = len(compressed)
-        
-        print(f"Results:")
-        print(f"  Original: {original_bytes} bytes")
-        print(f"  Compressed: {compressed_bytes} bytes") 
+    # Test compression, can tweak
+    config = CCDSConfig(max_size=15000, wavelet_levels=3, bit_planes=8)
+    
+    # Compression
+    compressed = rgb_compression(rgb_small, config)
+    
+    # Decompression
+    decoded_rgb = rgb_decompression(compressed, rgb_small.shape, config)
+    
+    # Save results
+    decoded_file = output_path / f"decoded_{image_path.stem}.png"
+    Image.fromarray(decoded_rgb).save(decoded_file)
 
-test_ccds()
+    # Calculate quality metrics
+    original_bytes = rgb_small.nbytes
+    compressed_bytes = len(compressed)
+    
+    logger.info(f"Results:")
+    logger.info(f"  Original: {original_bytes} bytes")
+    logger.info(f"  Compressed: {compressed_bytes} bytes")

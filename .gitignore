@@ -49,3 +49,6 @@ training_checkpoints
 
 #  onnx files
 *.onnx
+
+# big image
+image.NEF
