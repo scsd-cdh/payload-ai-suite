@@ -53,21 +53,37 @@ def populate(X_array, y_array, path, use_nir=False, end=False, gcs_handler=None)
     Returns:
         tuple: A tuple containing the updated X_array and y_array.
     """
+    logger.info(f"populate() called with path='{path}', use_nir={use_nir}, end={end}, gcs_handler={gcs_handler is not None}")
+    logger.info(f"Initial array lengths: X_array={len(X_array)}, y_array={len(y_array)}")
+    
+    images_processed = 0
+    images_skipped = 0
+    
     try:
         if gcs_handler:
             # Stream from GCS
+            logger.info(f"Listing images from GCS with prefix: {path}")
             image_paths = gcs_handler.list_images(prefix=path)
-            for image_path in image_paths:
+            logger.info(f"Found {len(image_paths)} images in GCS bucket with prefix '{path}'")
+            
+            for i, image_path in enumerate(image_paths):
+                logger.debug(f"Processing GCS image {i+1}/{len(image_paths)}: {image_path}")
+                
                 image_bytes = gcs_handler.download_as_bytes(image_path)
                 if image_bytes is None:
                     logger.warning(f"Could not read {image_path}, skipping...")
+                    images_skipped += 1
                     continue
+                    
                 rgb = stream_image_from_gcs(image_bytes)
                 if rgb is None:
                     logger.warning(f"Could not decode {image_path}, skipping...")
+                    images_skipped += 1
                     continue
 
+                logger.debug(f"Original image shape: {rgb.shape}")
                 rgb = cv2.resize(rgb, (224, 224))
+                logger.debug(f"Resized image shape: {rgb.shape}")
 
                 if use_nir:
                     nir = cv2.cvtColor(rgb, cv2.COLOR_BGR2GRAY)
@@ -78,28 +94,50 @@ def populate(X_array, y_array, path, use_nir=False, end=False, gcs_handler=None)
                     logger.debug(f"NIR processing - RGB shape: {rgb.shape}, NIR shape: {nir.shape}, Combined: {rgb_nir.shape}")
                     rgb_nir = dyn_zscore_normalize(rgb_nir)
                     X_array.append(rgb_nir)
+                    logger.debug(f"Added 4-channel image, X_array length now: {len(X_array)}")
                 else:
                     try:
                         fused_result = rgb_nir_fusion(rgb, use_enhanced_red=True)
+                        logger.debug(f"RGB-NIR fusion successful, result shape: {fused_result.shape}")
                     except Exception as e:
                         logger.warning(f"{e}: issue with rgb nir fusion technique, skipping for {image_path}")
                         fused_result = rgb
                     # Normalization still applied after fallback
                     rgb = dyn_zscore_normalize(fused_result)
                     X_array.append(rgb)
+                    logger.debug(f"Added 3-channel image, X_array length now: {len(X_array)}")
 
                 if not end:
-                    y_array.append(image_path[0:1])
+                    # Extract label from path - this might be the issue!
+                    label = image_path.split('/')[-2] if '/' in image_path else 'unknown'  # Get parent directory name
+                    y_array.append(label)
+                    logger.debug(f"Added label '{label}', y_array length now: {len(y_array)}")
+                
+                images_processed += 1
+                
         else:
             # Local files
-            for image in os.listdir(path):
+            logger.info(f"Processing local directory: {path}")
+            if not os.path.exists(path):
+                logger.error(f"Local path does not exist: {path}")
+                return X_array, y_array
+                
+            image_files = os.listdir(path)
+            logger.info(f"Found {len(image_files)} files in local directory")
+            
+            for i, image in enumerate(image_files):
                 image_path = os.path.join(path, image)
+                logger.debug(f"Processing local image {i+1}/{len(image_files)}: {image_path}")
 
                 rgb = cv2.imread(image_path)
                 if rgb is None:
                     logger.warning(f"Could not read {image_path}, skipping...")
+                    images_skipped += 1
                     continue
+                    
+                logger.debug(f"Original image shape: {rgb.shape}")
                 rgb = cv2.resize(rgb, (224, 224))
+                logger.debug(f"Resized image shape: {rgb.shape}")
 
                 if use_nir:
                     nir = cv2.cvtColor(rgb, cv2.COLOR_BGR2GRAY)
@@ -110,29 +148,43 @@ def populate(X_array, y_array, path, use_nir=False, end=False, gcs_handler=None)
                     logger.debug(f"NIR processing - RGB shape: {rgb.shape}, NIR shape: {nir.shape}, Combined: {rgb_nir.shape}")
                     rgb_nir = dyn_zscore_normalize(rgb_nir)
                     X_array.append(rgb_nir)
+                    logger.debug(f"Added 4-channel image, X_array length now: {len(X_array)}")
                 else:
                     # RGB NIR fusion algorthm still relevant if we have 4 channels
                     # the `use_nir` flag is soely for the AI model to take in a 4 channel input tensor
                     try:
                         fused_result = rgb_nir_fusion(rgb, use_enhanced_red=True)
+                        logger.debug(f"RGB-NIR fusion successful, result shape: {fused_result.shape}")
                     except Exception as e:
                         logger.warning(f"{e}: issue with the rgb nir fusion technique. Skipping for {image_path}")
                         fused_result = rgb
                     # Normalization still applied after fallback 
                     rgb = dyn_zscore_normalize(fused_result)
                     X_array.append(rgb)
+                    logger.debug(f"Added 3-channel image, X_array length now: {len(X_array)}")
 
                 if not end:
-                    y_array.append(image_path[0:1])
+                    # Extract label from parent directory name
+                    label = os.path.basename(os.path.dirname(image_path))
+                    y_array.append(label)
+                    logger.debug(f"Added label '{label}', y_array length now: {len(y_array)}")
+                
+                images_processed += 1
 
         if end:
             # Ensure y_array has the same length as X_array
+            initial_y_length = len(y_array)
             while len(y_array) < len(X_array):
                 y_array.append("N")
+            logger.info(f"Added {len(y_array) - initial_y_length} 'N' labels to balance arrays")
+            
     except cv2.error as e:
         logger.error(f"CV2 error in preprocess: {e}")
         raise e
 
+    logger.info(f"populate() complete: processed {images_processed} images, skipped {images_skipped} images")
+    logger.info(f"Final array lengths: X_array={len(X_array)}, y_array={len(y_array)}")
+    
     return X_array, y_array
 
 def stream_image_from_gcs(image_bytes: bytes) -> Optional[np.ndarray]:
