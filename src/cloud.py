@@ -15,7 +15,12 @@ from fastai.vision.learner import create_unet_model
 import onnx
 import onnxruntime as ort
 import cv2
+import logging
 from preprocess import dyn_zscore_normalize
+from paths import resolve_path
+
+# Set up logging
+logger = logging.getLogger(__name__)
 
 def load_omnicloudmask_model(weights_path, model_name="regnety_004", device="cpu"):
     """
@@ -82,12 +87,12 @@ def export_to_onnx(model, output_path, dummy_input_shape=(1, 3, 512, 512)):
         }
     )
 
-    print(f"Model exported to {output_path}")
+    logger.info(f"Model exported to {output_path}")
 
     # Verify the exported model
     onnx_model = onnx.load(output_path)
     onnx.checker.check_model(onnx_model)
-    print("ONNX model verified successfully")
+    logger.info("ONNX model verified successfully")
 
     return onnx_model
 
@@ -110,15 +115,15 @@ def test_onnx_inference(onnx_path, test_shape=(1, 3, 509, 509)):
     ort_inputs = {ort_session.get_inputs()[0].name: test_input}
     ort_outputs = ort_session.run(None, ort_inputs)
 
-    print(f"ONNX inference successful!")
-    print(f"Input shape: {test_input.shape}")
-    print(f"Output shape: {ort_outputs[0].shape}")
-    print(f"Output range: [{ort_outputs[0].min():.4f}, {ort_outputs[0].max():.4f}]")
+    logger.info(f"ONNX inference successful!")
+    logger.info(f"Input shape: {test_input.shape}")
+    logger.info(f"Output shape: {ort_outputs[0].shape}")
+    logger.info(f"Output range: [{ort_outputs[0].min():.4f}, {ort_outputs[0].max():.4f}]")
 
     return ort_outputs[0]
 
 
-def test_on_labeled_images(onnx_path, data_dir="data/labeled", max_images=5):
+def test_on_labeled_images(onnx_path, data_dir=None, max_images=5):
     """
     Test OmniCloudMask ONNX model on labeled wildfire images.
 
@@ -127,34 +132,36 @@ def test_on_labeled_images(onnx_path, data_dir="data/labeled", max_images=5):
         data_dir: Base directory containing 'yes' and 'no' subdirectories
         max_images: Maximum number of images to test per category
     """
+    if data_dir is None:
+        data_dir = resolve_path("data/labeled")
     # Create ONNX runtime session
     ort_session = ort.InferenceSession(onnx_path)
 
     # Class names for OmniCloudMask
     class_names = ['Clear', 'Thin Cloud', 'Thick Cloud', 'Cloud Shadow']
 
-    print(f"\n{'='*60}")
-    print("TESTING ON LABELED WILDFIRE DATA")
-    print(f"{'='*60}")
+    logger.info(f"\n{'='*60}")
+    logger.info("TESTING ON LABELED WILDFIRE DATA")
+    logger.info(f"{'='*60}")
 
     for category in ['no', 'yes']:
         category_dir = Path(data_dir) / category
         if not category_dir.exists():
-            print(f"Warning: Directory {category_dir} not found")
+            logger.warning(f"Directory {category_dir} not found")
             continue
 
-        print(f"\n--- Testing on {category.upper()} (wildfire={category}) samples ---")
+        logger.info(f"\n--- Testing on {category.upper()} (wildfire={category}) samples ---")
 
         image_files = list(category_dir.glob("*.tiff")) + list(category_dir.glob("*.tif"))
 
         for i, img_path in enumerate(image_files[:max_images]):
             try:
-                print(f"\n{i+1}. Processing: {img_path.name}")
+                logger.debug(f"\n{i+1}. Processing: {img_path.name}")
 
                 # Load image using OpenCV
                 img = cv2.imread(str(img_path), cv2.IMREAD_UNCHANGED)
                 if img is None:
-                    print(f"   Error: Could not read {img_path}")
+                    logger.error(f"   Error: Could not read {img_path}")
                     continue
 
                 # Check number of channels
@@ -162,18 +169,18 @@ def test_on_labeled_images(onnx_path, data_dir="data/labeled", max_images=5):
                     # Grayscale - convert to RGB
                     img = cv2.cvtColor(img, cv2.COLOR_GRAY2RGB)
                     nir = img[:, :, 0]  # Use red channel as NIR
-                    print("   Grayscale image converted to RGB, using RED as NIR")
+                    logger.debug("   Grayscale image converted to RGB, using RED as NIR")
                 elif img.shape[2] == 3:
                     # RGB only
                     nir = img[:, :, 0]  # Use red channel as NIR
-                    print("   RGB image, using RED band as NIR substitute")
+                    logger.debug("   RGB image, using RED band as NIR substitute")
                 elif img.shape[2] >= 4:
                     # Has alpha/NIR channel
                     nir = img[:, :, 3]
                     img = img[:, :, :3]  # Keep only RGB
-                    print("   Using 4th channel as NIR band")
+                    logger.debug("   Using 4th channel as NIR band")
                 else:
-                    print(f"   Unexpected number of channels: {img.shape[2]}")
+                    logger.warning(f"   Unexpected number of channels: {img.shape[2]}")
                     continue
 
                 # Get RGB channels (OpenCV uses BGR order)
@@ -224,17 +231,17 @@ def test_on_labeled_images(onnx_path, data_dir="data/labeled", max_images=5):
                     percentage = (pixel_count / total_pixels) * 100
                     class_percentages[cls_name] = percentage
 
-                print(f"   Original size: {w}x{h}")
-                print("   Cloud mask predictions:")
+                logger.info(f"   Original size: {w}x{h}")
+                logger.info("   Cloud mask predictions:")
                 for cls_name, percentage in class_percentages.items():
-                    print(f"     - {cls_name}: {percentage:.1f}%")
+                    logger.info(f"     - {cls_name}: {percentage:.1f}%")
 
                 # Calculate overall cloud coverage
                 cloud_coverage = class_percentages['Thin Cloud'] + class_percentages['Thick Cloud'] + class_percentages['Cloud Shadow']
-                print(f"   Total cloud/shadow coverage: {cloud_coverage:.1f}%")
+                logger.info(f"   Total cloud/shadow coverage: {cloud_coverage:.1f}%")
 
             except Exception as e:
-                print(f"   Error processing {img_path.name}: {e}")
+                logger.error(f"   Error processing {img_path.name}: {e}")
                 import traceback
                 traceback.print_exc()
 
@@ -243,7 +250,7 @@ def main():
     """Main function to export OmniCloudMask models to ONNX."""
 
     # Define model paths
-    models_dir = Path("models/omnicloudmask")
+    models_dir = Path(resolve_path("models/omnicloudmask"))
 
     # Model configurations
     model_configs = [
@@ -261,15 +268,15 @@ def main():
 
     # Process each model
     for config in model_configs:
-        print(f"\n{'='*60}")
-        print(f"Processing {config['model_name']} model")
-        print(f"{'='*60}")
+        logger.info(f"\n{'='*60}")
+        logger.info(f"Processing {config['model_name']} model")
+        logger.info(f"{'='*60}")
 
         try:
             # Check if ONNX already exists
             if config["output_path"].exists():
-                print(f"ONNX model already exists at {config['output_path']}")
-                print("Skipping export, testing on labeled data...")
+                logger.info(f"ONNX model already exists at {config['output_path']}")
+                logger.info("Skipping export, testing on labeled data...")
 
                 # Test on labeled wildfire data
                 test_on_labeled_images(config["output_path"])
@@ -277,33 +284,33 @@ def main():
 
             # Check if weights file exists
             if not config["weights_path"].exists():
-                print(f"Warning: Weights file not found at {config['weights_path']}")
-                print("Skipping this model...")
+                logger.warning(f"Weights file not found at {config['weights_path']}")
+                logger.info("Skipping this model...")
                 continue
 
             # Load model
-            print(f"\n1. Loading model from {config['weights_path']}")
+            logger.info(f"\n1. Loading model from {config['weights_path']}")
             model = load_omnicloudmask_model(
                 weights_path=config["weights_path"],
                 model_name=config["model_name"],
                 device="cpu"
             )
-            print("Model loaded successfully")
+            logger.info("Model loaded successfully")
 
             # Count parameters
             total_params = sum(p.numel() for p in model.parameters())
-            print(f"Total parameters: {total_params:,}")
+            logger.info(f"Total parameters: {total_params:,}")
 
             # Export to ONNX
-            print(f"\n2. Exporting to ONNX format")
+            logger.info(f"\n2. Exporting to ONNX format")
             export_to_onnx(model, config["output_path"])
 
             # Test ONNX inference
-            print(f"\n3. Testing ONNX inference")
+            logger.info(f"\n3. Testing ONNX inference")
             test_onnx_inference(config["output_path"])
 
             # Test on labeled wildfire data
-            print(f"\n4. Testing on labeled wildfire images")
+            logger.info(f"\n4. Testing on labeled wildfire images")
             test_on_labeled_images(config["output_path"])
 
             # Clean up
@@ -311,13 +318,13 @@ def main():
             torch.cuda.empty_cache()
 
         except Exception as e:
-            print(f"Error processing {config['model_name']}: {e}")
+            logger.error(f"Error processing {config['model_name']}: {e}")
             import traceback
             traceback.print_exc()
 
-    print(f"\n{'='*60}")
-    print("Export complete!")
-    print(f"{'='*60}")
+    logger.info(f"\n{'='*60}")
+    logger.info("Export complete!")
+    logger.info(f"{'='*60}")
 
 
 if __name__ == "__main__":

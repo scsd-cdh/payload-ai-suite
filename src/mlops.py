@@ -9,6 +9,7 @@ from typing import List, Optional
 
 from google import genai
 from google.cloud import storage
+from paths import get_gcs_credentials_path, resolve_path
 
 # Uncomment to load environment variables from .env file
 # from dotenv import load_dotenv
@@ -22,7 +23,7 @@ try:
     if client:
         GEMINI_AVAILABLE = True
 except Exception as e:
-    print(f"{e}: no google api key found in environment.")
+    logging.warning(f"{e}: no google api key found in environment.")
 
 class GCSHandler:
     """Handler for Google Cloud Storage operations with streaming support."""
@@ -31,7 +32,7 @@ class GCSHandler:
         # Use environment variables for configuration
         self.bucket_name = os.getenv('GCS_BUCKET_NAME')
         self.project_id = os.getenv('GCS_PROJECT_ID')
-        self.credentials_path = os.getenv('GOOGLE_APPLICATION_CREDENTIALS')
+        self.credentials_path = os.getenv('GOOGLE_APPLICATION_CREDENTIALS', get_gcs_credentials_path())
 
         # Set up logging
         self.logger = logging.getLogger(__name__)
@@ -173,26 +174,26 @@ def multimodal_qc(file_input, file_name=None, use_gcs=False, gcs_handler=None):
             # Calculate delay with exponential backoff: 1min, 2min, 4min, 8min
             delay = base_delay * (2 ** attempt)
             delay_minutes = delay / 60
-            print(f"API request failed (attempt {attempt + 1}/{max_retries}): {str(e)}")
-            print(f"Retrying in {delay_minutes:.1f} minutes...")
+            logging.warning(f"API request failed (attempt {attempt + 1}/{max_retries}): {str(e)}")
+            logging.info(f"Retrying in {delay_minutes:.1f} minutes...")
             time.sleep(delay)
-    print(f"Raw response for {file_name}: {raw_response_text}")
+    logging.debug(f"Raw response for {file_name}: {raw_response_text}")
 
     if "yes" in raw_response_text and "no" not in raw_response_text:
         binary_output = "fire"
     elif "no" in raw_response_text:
         binary_output = "no fire"
     else:
-        print(f"Warning: Ambiguous response for {file_name}: {raw_response_text}. Defaulting to 'no fire'.")
+        logging.warning(f"Ambiguous response for {file_name}: {raw_response_text}. Defaulting to 'no fire'.")
         binary_output = "no fire"
 
-    print(f"Binary output for {file_name}: {binary_output}")
+    logging.info(f"Binary output for {file_name}: {binary_output}")
 
     # Determine output path
     if binary_output == "fire":
-        output_path = "labeled/yes" if use_gcs else "data/labeled/yes"
+        output_path = "labeled/yes" if use_gcs else resolve_path("data/labeled/yes")
     else:
-        output_path = "labeled/no" if use_gcs else "data/labeled/no"
+        output_path = "labeled/no" if use_gcs else resolve_path("data/labeled/no")
 
     # Save to appropriate location
     if use_gcs and gcs_handler:
@@ -210,7 +211,7 @@ def multimodal_qc(file_input, file_name=None, use_gcs=False, gcs_handler=None):
         if success:
             print(f"File saved to: gs://{gcs_handler.bucket_name}/{gcs_path}")
         else:
-            print(f"Failed to save file to GCS: {gcs_path}")
+            logging.error(f"Failed to save file to GCS: {gcs_path}")
     else:
         # Save locally
         local_output_dir = os.path.join(".", output_path)
@@ -229,7 +230,7 @@ def multimodal_qc(file_input, file_name=None, use_gcs=False, gcs_handler=None):
 
     return binary_output
 
-def run_multimodal_qc(use_gcs=False):
+def run_multimodal_qc(use_gcs=False, input_path=None):
     """Orchestrates the multimodal quality control process for a batch of images.
 
     This function identifies image files either locally or in GCS and processes
@@ -237,6 +238,8 @@ def run_multimodal_qc(use_gcs=False):
 
     Args:
         use_gcs: Whether to use Google Cloud Storage for reading/writing files.
+        input_path: Path to the folder containing images to process. 
+                   Defaults to 'eonet_fire_events/to_process' if not specified.
     """
     if use_gcs:
         # Initialize GCS handler
@@ -263,7 +266,7 @@ def run_multimodal_qc(use_gcs=False):
                 # Stream download from GCS
                 image_bytes = gcs_handler.download_as_bytes(gcs_path)
                 if image_bytes is None:
-                    print(f"Failed to download {gcs_path}, skipping")
+                    logging.error(f"Failed to download {gcs_path}, skipping")
                     continue
 
                 # Extract just the filename from full GCS path
@@ -278,18 +281,25 @@ def run_multimodal_qc(use_gcs=False):
 
         except Exception as e:
             logging.error(f"Failed to initialize GCS handler: {str(e)}")
-            print("Falling back to local processing due to GCS error")
+            logging.info("Falling back to local processing due to GCS error")
             use_gcs = False
 
     if not use_gcs:
         # Standard local file processing
-        image_files = glob.glob("data/eonet_fire_events/to_process/*")
+        if input_path:
+            # Use provided path
+            base_path = resolve_path(f"data/{input_path}")
+        else:
+            # Default to eonet path
+            base_path = resolve_path("data/eonet_fire_events/to_process")
+        
+        image_files = glob.glob(f"{base_path}/*")
 
         if not image_files:
-            print("No images found locally in data/eonet_fire_events/to_process/")
+            print(f"No images found locally in {base_path}")
             return
 
-        print(f"Found {len(image_files)} images locally to process")
+        print(f"Found {len(image_files)} images locally to process in {base_path}")
 
         # Process each file from local directory
         if GEMINI_AVAILABLE:
@@ -300,4 +310,239 @@ def run_multimodal_qc(use_gcs=False):
                     logging.error(f"Error processing {file_path}: {str(e)}")
                     continue
         else:
-            print(f"Multimodal qc not available. Genai client not set")
+            logging.error(f"Multimodal qc not available. Genai client not set")
+
+
+def upload_labeled_to_gcs():
+    """Upload local labeled data to Google Cloud Storage after cleaning up files.
+    
+    This function:
+    1. Runs the clean_up_files.py script to remove duplicates and empty files
+    2. Uploads all files from ../data/labeled/yes and ../data/labeled/no to GCS
+    3. Uses cloud directory structure: labeled/yes and labeled/no
+    """
+    import subprocess
+    import os
+    import glob
+    
+    print("=" * 80)
+    print("Starting labeled data upload to GCS")
+    print("=" * 80)
+    
+    # Step 1: Run cleanup script using uv
+    print("\nStep 1: Running clean_up_files.py to remove duplicates and empty files...")
+    cleanup_script = "clean_up_files.py"
+    
+    try:
+        # Run the cleanup script - it will prompt for confirmation
+        result = subprocess.run(
+            ["uv", "run", cleanup_script],
+            text=True,
+            cwd=os.path.dirname(__file__)
+        )
+        
+        if result.returncode == 0:
+            logging.info("Cleanup completed successfully!")
+            if result.stdout:
+                logging.debug(result.stdout)
+        else:
+            logging.warning(f"Cleanup script returned non-zero exit code: {result.returncode}")
+            if result.stderr:
+                logging.error("Error output:", result.stderr)
+            response = input("\nDo you want to continue with upload anyway? (yes/no): ").strip().lower()
+            if response != 'yes':
+                print("Upload cancelled.")
+                return
+    except Exception as e:
+        logging.error(f"Error running cleanup script: {e}")
+        response = input("\nDo you want to continue with upload anyway? (yes/no): ").strip().lower()
+        if response != 'yes':
+            print("Upload cancelled.")
+            return
+    
+    # Step 2: Initialize GCS handler
+    print("\nStep 2: Initializing Google Cloud Storage connection...")
+    try:
+        gcs_handler = GCSHandler()
+    except Exception as e:
+        logging.error(f"Failed to initialize GCS handler: {e}")
+        logging.error("Make sure GCS environment variables are set correctly.")
+        return
+    
+    # Step 3: Upload files
+    print("\nStep 3: Uploading labeled data to GCS...")
+    
+    labels = ["yes", "no"]
+    total_uploaded = 0
+    failed_uploads = []
+    
+    for label in labels:
+        local_path = resolve_path(f"data/labeled/{label}")
+        # Cloud structure is different - no 'data' prefix
+        gcs_base_path = f"labeled/{label}"
+        
+        # Find all files in the directory
+        pattern = os.path.join(local_path, "*")
+        files = glob.glob(pattern)
+        
+        print(f"\nUploading {len(files)} files from {local_path} to gs://{gcs_handler.bucket_name}/{gcs_base_path}/")
+        
+        for file_path in files:
+            if os.path.isfile(file_path):
+                filename = os.path.basename(file_path)
+                gcs_path = f"{gcs_base_path}/{filename}"
+                
+                try:
+                    with open(file_path, 'rb') as f:
+                        data = f.read()
+                    
+                    # Determine content type based on file extension
+                    ext = os.path.splitext(filename)[1].lower()
+                    content_type = {
+                        '.png': 'image/png',
+                        '.jpg': 'image/jpeg',
+                        '.jpeg': 'image/jpeg',
+                        '.tiff': 'image/tiff',
+                        '.tif': 'image/tiff'
+                    }.get(ext, 'application/octet-stream')
+                    
+                    success = gcs_handler.upload_bytes(data, gcs_path, content_type=content_type)
+                    
+                    if success:
+                        total_uploaded += 1
+                        if total_uploaded % 50 == 0:  # Progress indicator every 50 files
+                            print(f"  Progress: {total_uploaded} files uploaded...")
+                    else:
+                        failed_uploads.append(file_path)
+                        
+                except Exception as e:
+                    logging.error(f"Error uploading {filename}: {e}")
+                    failed_uploads.append(file_path)
+    
+    # Step 4: Summary
+    print("\n" + "=" * 80)
+    print("Upload Summary:")
+    print(f"- Total files uploaded: {total_uploaded}")
+    print(f"- Failed uploads: {len(failed_uploads)}")
+    
+    if failed_uploads:
+        print("\nFailed files:")
+        for f in failed_uploads[:10]:  # Show first 10
+            print(f"  - {f}")
+        if len(failed_uploads) > 10:
+            print(f"  ... and {len(failed_uploads) - 10} more")
+    
+    print("\nUpload complete!")
+    print(f"Data is now available at: gs://{gcs_handler.bucket_name}/labeled/")
+    print("=" * 80)
+
+
+def download_labeled_from_gcs():
+    """Download labeled data from Google Cloud Storage to local filesystem.
+    
+    This function:
+    1. Prompts user for confirmation before downloading
+    2. Downloads all files from GCS labeled/yes and labeled/no
+    3. Saves them to local data/labeled/yes and data/labeled/no directories
+    4. Creates directories if they don't exist
+    5. Shows progress and summary
+    """
+    import os
+    
+    # Set up logging
+    logger = logging.getLogger(__name__)
+    logger.setLevel(logging.INFO)
+    
+    logger.info("=" * 80)
+    logger.info("Download Labeled Data from Google Cloud Storage")
+    logger.info("=" * 80)
+    
+    # Step 1: Get user confirmation
+    logger.info("\nThis will download all labeled data from Google Cloud Storage.")
+    logger.info("Files will be saved to:")
+    logger.info("  - data/labeled/yes/")
+    logger.info("  - data/labeled/no/")
+    logger.info("\nExisting files with the same names will be overwritten.")
+    
+    response = input("\nDo you want to continue? (yes/no): ").strip().lower()
+    if response != 'yes':
+        logger.info("Download cancelled.")
+        return
+    
+    # Step 2: Initialize GCS handler
+    logger.info("Initializing Google Cloud Storage connection...")
+    try:
+        gcs_handler = GCSHandler()
+    except Exception as e:
+        logger.error(f"Failed to initialize GCS handler: {e}")
+        logger.error("Make sure GCS environment variables are set correctly.")
+        return
+    
+    # Step 3: Create local directories if they don't exist
+    labels = ["yes", "no"]
+    for label in labels:
+        local_dir = resolve_path(f"data/labeled/{label}")
+        os.makedirs(local_dir, exist_ok=True)
+        logger.debug(f"Created/verified directory: {local_dir}")
+    
+    # Step 4: Download files
+    logger.info("Downloading labeled data from GCS...")
+    
+    total_downloaded = 0
+    failed_downloads = []
+    
+    for label in labels:
+        gcs_prefix = f"labeled/{label}/"
+        local_dir = resolve_path(f"data/labeled/{label}")
+        
+        # List all files in GCS with this prefix
+        try:
+            blobs = list(gcs_handler.bucket.list_blobs(prefix=gcs_prefix))
+            files = [blob for blob in blobs if not blob.name.endswith('/')]
+            
+            logger.info(f"Found {len(files)} files in gs://{gcs_handler.bucket_name}/{gcs_prefix}")
+            logger.info(f"Downloading to {local_dir}/...")
+            
+            for blob in files:
+                filename = os.path.basename(blob.name)
+                local_path = os.path.join(local_dir, filename)
+                
+                try:
+                    # Download the file
+                    logger.debug(f"Downloading {blob.name} to {local_path}")
+                    data = blob.download_as_bytes()
+                    
+                    # Save to local filesystem
+                    with open(local_path, 'wb') as f:
+                        f.write(data)
+                    
+                    total_downloaded += 1
+                    if total_downloaded % 50 == 0:  # Progress indicator every 50 files
+                        logger.info(f"Progress: {total_downloaded} files downloaded...")
+                        
+                except Exception as e:
+                    logger.error(f"Failed to download {blob.name}: {e}")
+                    failed_downloads.append((blob.name, str(e)))
+                    
+        except Exception as e:
+            logger.error(f"Error listing files with prefix {gcs_prefix}: {e}")
+            continue
+    
+    # Step 5: Summary
+    logger.info("=" * 80)
+    logger.info("Download Summary:")
+    logger.info(f"- Total files downloaded: {total_downloaded}")
+    logger.info(f"- Failed downloads: {len(failed_downloads)}")
+    
+    if failed_downloads:
+        logger.warning("Failed files:")
+        for blob_name, error in failed_downloads[:10]:  # Show first 10
+            logger.warning(f"  - {blob_name}: {error}")
+        if len(failed_downloads) > 10:
+            logger.warning(f"  ... and {len(failed_downloads) - 10} more")
+    
+    logger.info("Download complete!")
+    logger.info("Data is now available at:")
+    logger.info("  - data/labeled/yes/")
+    logger.info("  - data/labeled/no/")
+    logger.info("=" * 80)

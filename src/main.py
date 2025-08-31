@@ -1,15 +1,21 @@
 """CLI entry point for tools suite access. As needed, add appropriate argument options as the project grows.
 """
 import argparse
+import logging
 import model
-import cloud
+import cloud as cloud
 from fetch import (
     nasa_firms_api,
     setup_auth,
     batch_data_downloader_selenium,
     retrieve_eonet_cross_reference,
-    copernicus_sentiel_query,
+    copernicus_query,
+    convert_sen2fire_labeled
 )
+
+# Set up logging
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+logger = logging.getLogger(__name__)
 
 if __name__ == "__main__":
     """
@@ -24,7 +30,7 @@ if __name__ == "__main__":
         --setup-auth: Set up OAuth2 authentication for Copernicus.
         --batch-download: Download images using Selenium.
         --eonet-crossref: Fetch wildfire data from the EONET API.
-        --copernicus-query: Query Sentinel data from Copernicus.
+        --copernicus-query: Query remote satellite data from Copernicus.
         --coordinates: Specify coordinates for the query in the format: LON LAT.
         --time-range: Time range for the query in the format: FROM TO
                       (e.g., '2023-01-01T00:00:00Z 2023-01-03T23:59:59Z').
@@ -49,12 +55,19 @@ if __name__ == "__main__":
                         help="Time range for the query in the format: FROM TO (e.g., '2023-01-01T00:00:00Z 2023-01-03T23:59:59Z')")
     parser.add_argument('--use-nir', required=False, action='store_true', help="Enable 4-channel RGB-NIR input")
     parser.add_argument('--multimodal-qc', required=False, action='store_true', help="Run multimodal quality control check")
+    parser.add_argument('--qc-path', required=False, type=str, help="Path to folder for QC processing (e.g., 'sen2fire/to_qc' or 'eonet_fire_events/to_process')")
     parser.add_argument('--use-gcs', required=False, action='store_true', help="Stream training data from Google Cloud Storage")
+    parser.add_argument('--process-sen2fire', required=False, action='store_true', help="Convert Sen2Fire dataset to a state to be processed by the pipeline.")
     parser.add_argument('--cloud-mask', required=False, action='store_true', help="Export OmniCloudMask models to ONNX and test on labeled data")
+    parser.add_argument('--upload-labeled', required=False, action='store_true', help="Upload labeled data to GCS after running cleanup")
+    parser.add_argument('--download-labeled', required=False, action='store_true', help="Download labeled data from GCS to local filesystem")
+    parser.add_argument('--use-mixed-res', required=False, action='store_true', help="Enable mixed resolution operations during training")
+    parser.add_argument('--epochs', required=False, type=int, default=12, help="Number of epochs for training")
 
     args = parser.parse_args()
     if args.run_model:
-        model.train(use_nir=args.use_nir, use_gcs=args.use_gcs)
+        model.train(use_nir=args.use_nir, use_gcs=args.use_gcs, 
+                   use_mixed_res=args.use_mixed_res, epochs=args.epochs)
     elif args.nasa_firms:
         nasa_firms_api()
     elif args.setup_auth:
@@ -64,12 +77,19 @@ if __name__ == "__main__":
     elif args.eonet_crossref:
         retrieve_eonet_cross_reference()
     elif args.copernicus_query:
-        copernicus_sentiel_query(use_gcs=args.use_gcs)
+        copernicus_query(use_gcs=args.use_gcs)
     elif args.multimodal_qc:
         import mlops
-        mlops.run_multimodal_qc(use_gcs=args.use_gcs)
+        mlops.run_multimodal_qc(use_gcs=args.use_gcs, input_path=args.qc_path)
+    elif args.process_sen2fire:
+        convert_sen2fire_labeled(use_nir=args.use_nir)
     elif args.cloud_mask:
-        
         cloud.main()
+    elif args.upload_labeled:
+        import mlops
+        mlops.upload_labeled_to_gcs()
+    elif args.download_labeled:
+        import mlops
+        mlops.download_labeled_from_gcs()
     else:
-        print("No valid arguments provided. Use -h for help.")
+        logger.error("No valid arguments provided. Use -h for help.")

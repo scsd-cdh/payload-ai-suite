@@ -10,8 +10,9 @@ import cv2
 import numpy as np
 import random
 import logging
-from typing import Optional, List, Tuple, Union
-from src.mixed_res_config import DEFAULT_MIXED_RES_CONFIG
+from typing import Optional, List, Tuple, Union, Any
+from pydantic import BaseModel, Field, validator
+from mixed_res_config import DEFAULT_MIXED_RES_CONFIG
 
 # Set up logging
 logger = logging.getLogger(__name__)
@@ -27,206 +28,191 @@ def random_resize_with_pad(image: np.ndarray, min_scale: float = 0.5, max_scale:
         max_scale: Maximum scaling factor
     
     Returns:
-        Resized and padded image with original dimensions
+        Resized and padded image with same shape as input
     """
-    logger.debug(f"Starting random_resize_with_pad - Input shape: {image.shape}")
+    h, w = image.shape[:2]
     
-    original_height, original_width = image.shape[:2]
+    # Random scale
+    scale = np.random.uniform(min_scale, max_scale)
+    new_h = int(h * scale)
+    new_w = int(w * scale)
     
-    # Choose random scale factor
-    scale = min_scale + random.random() * (max_scale - min_scale)
+    # Resize image
+    resized = cv2.resize(image, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
     
-    # Calculate new dimensions
-    new_height = int(original_height * scale)
-    new_width = int(original_width * scale)
-    
-    # Ensure new dimensions are at least 1 pixel
-    new_height = max(1, new_height)
-    new_width = max(1, new_width)
-    
-    logger.debug(f"Resizing with scale {scale:.2f} to dimensions {new_width}x{new_height}")
-    
-    # If the scale would produce an image too large, cap it to the original size
-    # This is done to prevent issues with padding calculations
-    if new_height > original_height:
-        new_height = original_height
-    if new_width > original_width:
-        new_width = original_width
-    
-    # Choose appropriate interpolation method based on scale
-    # INTER_AREA is recommended for downsampling to avoid aliasing
-    # INTER_LINEAR is better for upsampling
-    interpolation = cv2.INTER_AREA if scale < 1.0 else cv2.INTER_LINEAR
+    # Pad to original size
+    if scale < 1.0:
+        # Image was shrunk, need to pad
+        pad_h = h - new_h
+        pad_w = w - new_w
         
-    # Resize image with proper interpolation
-    resized_image = cv2.resize(image, (new_width, new_height), interpolation=interpolation)
-    
-    # Create canvas with original dimensions
-    if len(image.shape) == 3:
-        canvas = np.zeros((original_height, original_width, image.shape[2]), dtype=image.dtype)
+        # Calculate padding for each side
+        top = pad_h // 2
+        bottom = pad_h - top
+        left = pad_w // 2
+        right = pad_w - left
+        
+        # Pad with zeros (black)
+        padded = cv2.copyMakeBorder(resized, top, bottom, left, right, 
+                                   cv2.BORDER_CONSTANT, value=0)
     else:
-        canvas = np.zeros((original_height, original_width), dtype=image.dtype)
+        # Image was enlarged, need to crop to center
+        start_h = (new_h - h) // 2
+        start_w = (new_w - w) // 2
+        padded = resized[start_h:start_h+h, start_w:start_w+w]
     
-    # Calculate padding
-    y_offset = (original_height - new_height) // 2
-    x_offset = (original_width - new_width) // 2
-    
-    # Place resized image in center of canvas - with safe bounds checking
-    resized_h, resized_w = resized_image.shape[:2]
-    
-    # Calculate the valid regions for both the canvas and resized image
-    canvas_y_end = min(y_offset + resized_h, original_height)
-    canvas_x_end = min(x_offset + resized_w, original_width)
-    
-    # Calculate how much of the resized image can fit
-    resized_y_end = canvas_y_end - y_offset
-    resized_x_end = canvas_x_end - x_offset
-    
-    # Now do the assignment with properly matched dimensions
-    canvas[y_offset:canvas_y_end, x_offset:canvas_x_end] = resized_image[:resized_y_end, :resized_x_end]
-    
-    logger.debug(f"Completed random_resize_with_pad - Output shape: {canvas.shape}")
-    return canvas
+    return padded
 
 
-def multi_resolution_batch(images: List[np.ndarray], resolution_scales: List[float] = None) -> List[np.ndarray]:
+def create_multi_resolution_batch(images: List[np.ndarray], 
+                                scales: List[float] = [0.5, 0.75, 1.0, 1.25, 1.5]) -> List[np.ndarray]:
     """
-    Apply different resolutions to a batch of images.
-    Each image in the batch gets a randomly selected resolution scale.
-    This helps train models to be resolution-agnostic by simulating 
-    imagery captured at different resolutions.
+    Create a batch with images at multiple resolutions.
+    This helps the model learn scale-invariant features.
     
     Args:
         images: List of input images
-        resolution_scales: List of scale factors to apply. If None, defaults to [0.5, 0.75, 1.0, 1.25, 1.5]
+        scales: List of scale factors to apply
     
     Returns:
-        List of images with varied resolutions
+        List of images at various scales (padded to original size)
     """
-    if resolution_scales is None:
-        resolution_scales = [0.5, 0.75, 1.0, 1.25, 1.5]
+    multi_res_batch = []
     
-    logger.debug(f"Starting multi_resolution_batch with {len(images)} images")
-    
-    result = []
     for img in images:
-        # Randomly select a scale
-        scale = random.choice(resolution_scales)
-        height, width = img.shape[:2]
+        # Randomly select a scale for this image
+        scale = random.choice(scales)
         
-        # Calculate new dimensions
-        new_height = int(height * scale)
-        new_width = int(width * scale)
+        # Apply the scale
+        h, w = img.shape[:2]
+        new_h = int(h * scale)
+        new_w = int(w * scale)
         
-        # Ensure new dimensions are at least 1 pixel
-        new_height = max(1, new_height)
-        new_width = max(1, new_width)
+        # Resize
+        resized = cv2.resize(img, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
         
-        logger.debug(f"Applying scale {scale:.2f} to image")
-        
-        # First downscale
+        # Pad or crop to original size
         if scale < 1.0:
-            # Downscale to lower resolution
-            temp_img = cv2.resize(img, (new_width, new_height), interpolation=cv2.INTER_AREA)
-            # Then upscale back to original size
-            processed_img = cv2.resize(temp_img, (width, height), interpolation=cv2.INTER_LINEAR)
-        elif scale > 1.0:
-            # For upscaling, we'll simulate having a higher resolution image by upscaling
-            # Then downscale back to original to simulate detail loss
-            temp_img = cv2.resize(img, (new_width, new_height), interpolation=cv2.INTER_LINEAR)
-            processed_img = cv2.resize(temp_img, (width, height), interpolation=cv2.INTER_AREA)
+            # Pad
+            pad_h = h - new_h
+            pad_w = w - new_w
+            top = pad_h // 2
+            bottom = pad_h - top
+            left = pad_w // 2
+            right = pad_w - left
+            final_img = cv2.copyMakeBorder(resized, top, bottom, left, right,
+                                         cv2.BORDER_CONSTANT, value=0)
         else:
-            # No change for scale = 1.0
-            processed_img = img.copy()
+            # Crop center
+            start_h = (new_h - h) // 2
+            start_w = (new_w - w) // 2
+            final_img = resized[start_h:start_h+h, start_w:start_w+w]
         
-        result.append(processed_img)
+        multi_res_batch.append(final_img)
     
-    logger.debug(f"Completed multi_resolution_batch - Processed {len(result)} images")
-    return result
+    return multi_res_batch
 
 
-def resolution_mixup(image: np.ndarray, alpha: float = 0.2) -> np.ndarray:
+def resolution_mixup(image1: np.ndarray, image2: np.ndarray, 
+                    alpha: float = 0.2) -> np.ndarray:
     """
-    Apply mixup between different resolution versions of the same image.
-    This is based on the mixup data augmentation technique (Zhang et al., 2017),
-    but applied to resolution variations instead of class labels.
+    Mix two images at different resolutions.
+    This creates training samples that are combinations of different scales.
     
     Args:
-        image: Input image
-        alpha: Mixing weight parameter (controls randomness of mix ratio)
-        
+        image1: First image
+        image2: Second image  
+        alpha: Mixing parameter (0 = all image1, 1 = all image2)
+    
     Returns:
-        Mixed resolution image
+        Mixed image
     """
-    logger.debug(f"Starting resolution_mixup - Input shape: {image.shape}")
+    # Ensure images have same shape
+    assert image1.shape == image2.shape, "Images must have same shape for mixup"
     
-    # Choose a random downsampling factor
-    down_factor = 0.4 + random.random() * 0.3  # Between 0.4 and 0.7
+    # Simple weighted average
+    mixed = (1 - alpha) * image1 + alpha * image2
     
-    height, width = image.shape[:2]
+    # Ensure output is in valid range
+    mixed = np.clip(mixed, 0, 255).astype(image1.dtype)
     
-    # Calculate downsampled dimensions
-    down_height = int(height * down_factor)
-    down_width = int(width * down_factor)
-    
-    # Ensure dimensions are at least 1 pixel
-    down_height = max(1, down_height)
-    down_width = max(1, down_width)
-    
-    # Downsample and then upsample to get lower resolution version
-    downsampled = cv2.resize(image, (down_width, down_height), interpolation=cv2.INTER_AREA)
-    low_res = cv2.resize(downsampled, (width, height), interpolation=cv2.INTER_LINEAR)
-    
-    # Generate mixing weight from beta distribution or simplified random
-    mix_ratio = alpha + random.random() * (1.0 - alpha)
-    
-    # Mix original and low-resolution images using cv2.addWeighted for better performance
-    mixed_image = cv2.addWeighted(image, mix_ratio, low_res, 1.0 - mix_ratio, 0)
-    
-    logger.debug(f"Completed resolution_mixup with down_factor={down_factor:.2f}, mix_ratio={mix_ratio:.2f}")
-    return mixed_image
+    return mixed
 
 
 def apply_mixed_resolution_ops(images: List[np.ndarray], 
-                              use_random_resize: bool = True, 
-                              use_multi_resolution: bool = True, 
-                              use_resolution_mixup: bool = True,
-                              **kwargs) -> List[np.ndarray]:
+                             use_random_resize: bool = True,
+                             use_multi_resolution: bool = True, 
+                             use_resolution_mixup: bool = True,
+                             min_scale: float = 0.5,
+                             max_scale: float = 1.5,
+                             resolution_scales: List[float] = [0.5, 0.75, 1.0, 1.25, 1.5],
+                             mixup_alpha: float = 0.2) -> List[np.ndarray]:
     """
-    Apply a combination of mixed resolution operations to a batch of images.
+    Apply mixed resolution operations to a batch of images.
     
     Args:
         images: List of input images
         use_random_resize: Whether to apply random resize with padding
-        use_multi_resolution: Whether to apply multi-resolution batch processing
+        use_multi_resolution: Whether to create multi-resolution batch
         use_resolution_mixup: Whether to apply resolution mixup
-        **kwargs: Additional parameters for the operations
-        
+        min_scale: Minimum scale for random resize
+        max_scale: Maximum scale for random resize
+        resolution_scales: Scales for multi-resolution batch
+        mixup_alpha: Alpha parameter for mixup
+    
     Returns:
         List of processed images
-    
-    Note: This function makes a copy of the list but modifies images in-place.
     """
-    logger.debug(f"Starting apply_mixed_resolution_ops on {len(images)} images")
+    logger.debug(f"Applying mixed resolution ops to {len(images)} images")
+    processed_images = images.copy()
     
-    processed_images = images.copy()  # Makes a copy of the list, but not the images themselves
-    
+    # Random resize with padding
     if use_random_resize:
-        min_scale = kwargs.get('min_scale', 0.5)
-        max_scale = kwargs.get('max_scale', 1.5)
-        processed_images = [random_resize_with_pad(img, min_scale, max_scale) for img in processed_images]
+        processed_images = [random_resize_with_pad(img, min_scale, max_scale) 
+                          for img in processed_images]
     
+    # Multi-resolution batch
     if use_multi_resolution:
-        resolution_scales = kwargs.get('resolution_scales', [0.5, 0.75, 1.0, 1.25, 1.5])
-        processed_images = multi_resolution_batch(processed_images, resolution_scales)
+        processed_images = create_multi_resolution_batch(processed_images, resolution_scales)
     
-    if use_resolution_mixup:
-        alpha = kwargs.get('mixup_alpha', 0.2)
-        processed_images = [resolution_mixup(img, alpha) for img in processed_images]
+    # Resolution mixup (only if we have at least 2 images)
+    if use_resolution_mixup and len(processed_images) >= 2:
+        # Randomly select pairs and mix them
+        for i in range(0, len(processed_images) - 1, 2):
+            if i + 1 < len(processed_images):
+                alpha = np.random.beta(mixup_alpha, mixup_alpha)
+                processed_images[i] = resolution_mixup(processed_images[i], 
+                                                     processed_images[i + 1], 
+                                                     alpha)
     
     logger.debug(f"Completed apply_mixed_resolution_ops")
     return processed_images
 
+
+class FusionInput(BaseModel):
+    """Validation model for RGB-NIR fusion input."""
+    image_shape: tuple = Field(..., description="Shape of input image")
+
+    @validator('image_shape')
+    def validate_shape(cls, v):
+        if len(v) != 3:
+            raise ValueError(f"Image must be 3-dimensional, got {len(v)} dimensions")
+        if v[2] != 4:
+            raise ValueError(f"Image must have 4 channels (RGB+NIR), got {v[2]} channels")
+        return v
+
+
+class FusionOutput(BaseModel):
+    """Validation model for RGB-NIR fusion output."""
+    image_shape: tuple = Field(..., description="Shape of output image")
+
+    @validator('image_shape')
+    def validate_shape(cls, v):
+        if len(v) != 3:
+            raise ValueError(f"Output must be 3-dimensional, got {len(v)} dimensions")
+        if v[2] != 3:
+            raise ValueError(f"Output must have 3 channels (RGB), got {v[2]} channels")
+        return v
 
 def populate(X_array, y_array, path, use_nir=False, end=False, gcs_handler=None, 
              use_mixed_res=False, mixed_res_config=None):
@@ -256,11 +242,11 @@ def populate(X_array, y_array, path, use_nir=False, end=False, gcs_handler=None,
             for image_path in image_paths:
                 image_bytes = gcs_handler.download_as_bytes(image_path)
                 if image_bytes is None:
-                    print(f"Could not read {image_path}, skipping...")
+                    logger.warning(f"Could not read {image_path}, skipping...")
                     continue
                 rgb = stream_image_from_gcs(image_bytes)
                 if rgb is None:
-                    print(f"Could not decode {image_path}, skipping...")
+                    logger.warning(f"Could not decode {image_path}, skipping...")
                     continue
 
                 # IMPORTANT: Apply mixed resolution operations BEFORE resizing to fixed size
@@ -276,10 +262,17 @@ def populate(X_array, y_array, path, use_nir=False, end=False, gcs_handler=None,
                     nir = np.expand_dims(nir, axis=-1)
                     # Shape (224, 224, 4)
                     rgb_nir = np.concatenate((rgb, nir), axis=-1)
-                    rgb_nir = dyn_zscore_normalize(rgb_nir) # normalization
+                    logger.debug(f"NIR processing - RGB shape: {rgb.shape}, NIR shape: {nir.shape}, Combined: {rgb_nir.shape}")
+                    rgb_nir = dyn_zscore_normalize(rgb_nir)
                     X_array.append(rgb_nir)
                 else:
-                    rgb = dyn_zscore_normalize(rgb) # normalization
+                    try:
+                        fused_result = rgb_nir_fusion(rgb, use_enhanced_red=True)
+                    except Exception as e:
+                        logger.warning(f"{e}: issue with rgb nir fusion technique, skipping for {image_path}")
+                        fused_result = rgb
+                    # Normalization still applied after fallback
+                    rgb = dyn_zscore_normalize(fused_result)
                     X_array.append(rgb)
 
                 if not end:
@@ -287,15 +280,11 @@ def populate(X_array, y_array, path, use_nir=False, end=False, gcs_handler=None,
         else:
             # Local files
             for image in os.listdir(path):
-                # Skip Windows metadata files
-                if image.endswith(':Zone.Identifier'):
-                    continue
-                    
                 image_path = os.path.join(path, image)
-                rgb = cv2.imread(image_path)
-                
+
+                rgb = cv2.imread(image_path, cv2.IMREAD_UNCHANGED)
                 if rgb is None:
-                    print(f"Could not read {image_path}, skipping...")
+                    logger.warning(f"Could not read {image_path}, skipping...")
                     continue
                     
                 # IMPORTANT: Apply mixed resolution operations BEFORE resizing to fixed size
@@ -311,10 +300,19 @@ def populate(X_array, y_array, path, use_nir=False, end=False, gcs_handler=None,
                     nir = np.expand_dims(nir, axis=-1)
                     # Shape (224, 224, 4)
                     rgb_nir = np.concatenate((rgb, nir), axis=-1)
-                    rgb_nir = dyn_zscore_normalize(rgb_nir) # normalization
+                    logger.debug(f"NIR processing - RGB shape: {rgb.shape}, NIR shape: {nir.shape}, Combined: {rgb_nir.shape}")
+                    rgb_nir = dyn_zscore_normalize(rgb_nir)
                     X_array.append(rgb_nir)
                 else:
-                    rgb = dyn_zscore_normalize(rgb) # normalization
+                    # RGB NIR fusion algorthm still relevant if we have 4 channels
+                    # the `use_nir` flag is soely for the AI model to take in a 4 channel input tensor
+                    try:
+                        fused_result = rgb_nir_fusion(rgb, use_enhanced_red=True)
+                    except Exception as e:
+                        logger.warning(f"{e}: issue with the rgb nir fusion technique. Skipping for {image_path}")
+                        fused_result = rgb
+                    # Normalization still applied after fallback 
+                    rgb = dyn_zscore_normalize(fused_result)
                     X_array.append(rgb)
 
                 if not end:
@@ -324,9 +322,8 @@ def populate(X_array, y_array, path, use_nir=False, end=False, gcs_handler=None,
             # Ensure y_array has the same length as X_array
             while len(y_array) < len(X_array):
                 y_array.append("N")
-                
     except cv2.error as e:
-        print(f"CV2 error in preprocess: {e}")
+        logger.error(f"CV2 error in preprocess: {e}")
         raise e
 
     # Log data loaded
@@ -346,9 +343,8 @@ def stream_image_from_gcs(image_bytes: bytes) -> Optional[np.ndarray]:
     """
     try:
         nparr = np.frombuffer(image_bytes, np.uint8)
-        # Match the behavior of for now cv2.imread() which defaults to IMREAD_COLOR
-        # THis is to avoid non-homegenous shape issues. However, this means we cant support use-nir multichannel use.
-        img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+        # Use IMREAD_UNCHANGED to preserve all channels (including 4-channel TIFFs)
+        img = cv2.imdecode(nparr, cv2.IMREAD_UNCHANGED)
         return img
     except Exception as e:
         logger.error(f"Failed to decode image: {str(e)}")
@@ -362,9 +358,6 @@ def dyn_zscore_normalize(img: np.ndarray, no_data_value: float = 0.0) -> np.ndar
     Requirements:
     -  per channel z-score normalization
     -  exclude no-data pixels from mean & standard deviation calculation (value: 0.0)
-    -  set no-data pixels to 0 after normalization
-    -  function should work for both 3- and 4-channel images
-
     '''
     logger.debug(f"Starting z-score normalization - Input shape: {img.shape}, dtype: {img.dtype}")
 
@@ -374,7 +367,7 @@ def dyn_zscore_normalize(img: np.ndarray, no_data_value: float = 0.0) -> np.ndar
     for c in range(img.shape[2]):
         channel = img[:,:, c] # by iterating through every channel in the images
         mask = channel != no_data_value # ignoring 0-values.... pixels are valid if they are not equal to the no_data_value
-        
+
         valid_pixel_count = np.sum(mask)
         logger.debug(f"Channel {c}: Found {valid_pixel_count} valid pixels out of {channel.size} total")
 
@@ -383,12 +376,12 @@ def dyn_zscore_normalize(img: np.ndarray, no_data_value: float = 0.0) -> np.ndar
 
             mean = valid_pxl.mean() # computation for the mean
             standard_dev = valid_pxl.std() # computation for the standard deviation
-            
+
             logger.debug(f"Channel {c}: Mean={mean:.4f}, Std={standard_dev:.4f}")
 
             standard_dev = standard_dev if standard_dev > 1e-8 else 1e-8 # checking for error by division of 0
             # set the number to a smaller number if too close to 0
-            
+
             if standard_dev < 1e-8:
                 logger.warning(f"Channel {c}: Very low standard deviation ({standard_dev}), using 1e-8 to avoid division by zero")
 
@@ -397,7 +390,7 @@ def dyn_zscore_normalize(img: np.ndarray, no_data_value: float = 0.0) -> np.ndar
             normal_channel[~mask] = 0.0 # 0.0 is assigned to pixels that were identified as 0
 
             normal_img[:,:,c] = normal_channel
-            
+
             # Log statistics of normalized channel
             normalized_valid = normal_channel[mask]
             logger.debug(f"Channel {c} after normalization: Mean={normalized_valid.mean():.4f}, Std={normalized_valid.std():.4f}")
@@ -410,34 +403,71 @@ def dyn_zscore_normalize(img: np.ndarray, no_data_value: float = 0.0) -> np.ndar
     return normal_img # should return image with the same shape that was given by the input
 
 
-def clean_zone_identifiers(data_dir='data'):
+def rgb_nir_fusion(image_data: np.ndarray[Any, np.dtype[np.integer[Any] | np.floating[Any]]],
+                   use_enhanced_red: bool = False, use_hsv_fusion: bool = False):
     """
-    Removes Windows Zone.Identifier files from the data directory.
-    This is useful to run once to clean up the dataset.
-    
-    Args:
-        data_dir: Base directory containing image data
+    Use nir band to "enhance" RGB image. Data fusion technique borrowed from robotics computer vision
+
+    Two flag options:
+
+    1. enhanced red
+    alpha = 0.5
+    enhanced_red = (1 - alpha) * red + alpha * nir
+    fused = np.stack([enhanced_red, green, blue], axis=-1)
+
+    2. We can try convert the image to a diferent colorspace (RGB -> HSV)
+    and then we combine the brightness channel (V) with the NIR image.
+    We fuse it back together using the inverse of RGB -> HSV matrix. Hue and saturation remain untouched.
     """
-    import glob
-    
-    # Find all Zone.Identifier files
-    zone_files = glob.glob(f'{data_dir}/**/*:Zone.Identifier', recursive=True)
-    
-    if zone_files:
-        logger.info(f"Found {len(zone_files)} Zone.Identifier files to clean")
-        
-        for file in zone_files:
-            try:
-                # Get the original filename without the Zone.Identifier suffix
-                original_file = file.split(':Zone.Identifier')[0]
-                
-                # Remove the Zone.Identifier file
-                os.remove(file)
-                logger.debug(f"Removed {file}")
-                
-            except Exception as e:
-                logger.error(f"Failed to clean {file}: {str(e)}")
-        
-        logger.info(f"Cleaned {len(zone_files)} Zone.Identifier files")
+    logger.info(f"RGB-NIR fusion called with shape: {image_data.shape}")
+
+    # Validate input
+    try:
+        input_validation = FusionInput(image_shape=image_data.shape)
+    except ValueError as e:
+        logger.error(f"Input validation failed: {e}")
+        raise
+
+    # Extract RGB and NIR from 4-channel input
+    rgb = image_data[:, :, :3]
+    nir = image_data[:, :, 3]
+
+    if use_enhanced_red:
+        logger.info("Using enhanced red fusion method")
+        blue, green, red = cv2.split(rgb)
+        alpha = 0.5
+        enhanced_red = (1 - alpha) * red + alpha * nir
+        fused = np.stack([blue, green, enhanced_red], axis=-1)
+        logger.debug(f"Enhanced red fusion complete - output shape: {fused.shape}")
+
+        # Validate output
+        try:
+            output_validation = FusionOutput(image_shape=fused.shape)
+        except ValueError as e:
+            logger.error(f"Output validation failed: {e}")
+            raise
+
+        return fused
+
+    elif use_hsv_fusion:
+        logger.info("Using HSV fusion method")
+        hsv = cv2.cvtColor(rgb, cv2.COLOR_BGR2HSV)
+        h, s, v = cv2.split(hsv)
+        # Combine V channel with NIR
+        enhanced_v = (v + nir) / 2
+        fused_hsv = cv2.merge([h, s, enhanced_v])
+        fused = cv2.cvtColor(fused_hsv, cv2.COLOR_HSV2BGR)
+        logger.debug(f"HSV fusion complete - output shape: {fused.shape}")
+
+        # Validate output
+        try:
+            output_validation = FusionOutput(image_shape=fused.shape)
+        except ValueError as e:
+            logger.error(f"Output validation failed: {e}")
+            raise
+
+        return fused
+
     else:
-        logger.info("No Zone.Identifier files found to clean")
+        logger.info("No fusion method specified, returning RGB channels only")
+        return rgb
