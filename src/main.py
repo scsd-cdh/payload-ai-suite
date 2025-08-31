@@ -61,10 +61,13 @@ if __name__ == "__main__":
     parser.add_argument('--cloud-mask', required=False, action='store_true', help="Export OmniCloudMask models to ONNX and test on labeled data")
     parser.add_argument('--upload-labeled', required=False, action='store_true', help="Upload labeled data to GCS after running cleanup")
     parser.add_argument('--download-labeled', required=False, action='store_true', help="Download labeled data from GCS to local filesystem")
+    parser.add_argument('--use-mixed-res', required=False, action='store_true', help="Enable mixed resolution operations during training")
+    parser.add_argument('--epochs', required=False, type=int, default=12, help="Number of epochs for training")
 
     args = parser.parse_args()
     if args.run_model:
-        model.train(use_nir=args.use_nir, use_gcs=args.use_gcs)
+        model.train(use_nir=args.use_nir, use_gcs=args.use_gcs, 
+                   use_mixed_res=args.use_mixed_res, epochs=args.epochs)
     elif args.nasa_firms:
         nasa_firms_api()
     elif args.setup_auth:
