@@ -371,6 +371,7 @@ def dyn_zscore_normalize(img: np.ndarray, no_data_value: float = 0.0) -> np.ndar
     Returns:
         Normalized image array with same shape as input. No-data pixels remain 0.0.
     """
+    # 32 bit only for training, in the wild optical system will be raw 8 bit
     img = img.astype(np.float32)
     epsilon = 1e-8
 
