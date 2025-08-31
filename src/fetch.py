@@ -1,15 +1,15 @@
 """Utilities for fetching data for the model
-- Selenium based flickr webscraper
-- EONET wildfire cross reference tool
 """
 
+from pathlib import Path
 import requests
 import json
 import time
 import os
 from mlops import GCSHandler
 from datetime import datetime
-from paths import resolve_path
+from paths import resolve_path, get_eonet_dir, get_data_dir, get_firms_dir
+from enum import Enum
 
 
 from oauthlib.oauth2 import BackendApplicationClient
@@ -26,14 +26,30 @@ from PIL import Image
 import logging
 logger = logging.getLogger(__name__)
 
+class Source(Enum):
+    EONET = "eonet"
+    FIRMS = "firms"
+
+    def __str__(self):
+        return self.value
+
+    @classmethod
+    def from_string(cls, source_str):
+        try:
+            return cls[source_str.upper()]
+        except KeyError:
+            raise ValueError(f"Invalid source: {source_str}. Must be one of {list(cls)}.")
+
 
 class ProgressTracker:
-    """Tracks progress of EONET data scraping at event and location level."""
+    """Tracks progress of location processing across different data sources (EONET, FIRMS, etc)."""
 
     # Legacy workflow starts at event 125
     LEGACY_START_INDEX = 125
 
-    def __init__(self, filepath='./progress_counter/eonet.json'):
+    def __init__(self, filepath=None):
+        if filepath is None:
+            filepath = resolve_path('progress_counter/locations_ledger.json')
         self.filepath = filepath
         self.progress = self._load_progress()
 
@@ -118,11 +134,80 @@ def nasa_firms_api():
     Returns:
         pd.DataFrame: A DataFrame containing the data availability information for NASA FIRMS.
     """
-    # TODO: Implement AREA_COORDINATES and DAY_RANGE etc. parameters for API call
+    # List of Sensors to Query
+    SENSORS = [
+    "MODIS_NRT",        # corresponds to MCD14DL.NRT.0061
+    "VIIRS_NOAA20_NRT", # corresponds to VJ114IMGT_NRT.002
+    ]
+
+    data_frames = []
+
+    for sensor in SENSORS:
+        try:
+            # Fetch data for each sensor with a time range of 1 day
+            # This will fetch data for the last 24 hours
+            # You can adjust the time range as needed
+
+            df = fetch_sensor_data(sensor, time_range=1)
+            if df is not None:
+                data_frames.append(df)
+        except Exception as e:
+            logger.error(f"Error fetching data for {sensor}: {e}")
+
+    all_filtered_fires = pd.concat(data_frames, ignore_index=True)
+
+    json_file_name = "./events/firms/events_{}.json".format(datetime.now().strftime("%Y%m%d"))
+
+    # Ensure the directory exists
+    firms_dir = resolve_path("events/firms")
+    os.makedirs(firms_dir, exist_ok=True)
+
+    json_file_name = os.path.join(firms_dir, "events_{}.json".format(datetime.now().strftime("%Y%m%d")))
+    all_filtered_fires.to_json(json_file_name, orient="records")
+
+    return all_filtered_fires
+
+
+def fetch_sensor_data(sensor, time_range) -> pd.DataFrame:
+    """
+    Fetches sensor data for a given sensor and time range.
+
+    Args:
+        sensor (str): The sensor to query (e.g., 'MODIS_NRT', 'VIIRS_NOAA20_NRT').
+        time_range (str): The time range for the query in number of days preceding the current day.
+
+    Returns:
+        pd.DataFrame: A DataFrame containing the sensor data.
+    """
+
     NASA_KEY = os.getenv("NASA_KEY")
-    data_url = 'https://firms.modaps.eosdis.nasa.gov/api/data_availability/csv/' + NASA_KEY + '/all'
-    data_frame = pd.read_csv(data_url)
-    return data_frame
+
+    if not NASA_KEY:
+        raise RuntimeError("Please set NASA_KEY in your .env file.")
+
+    url = (
+        f"https://firms.modaps.eosdis.nasa.gov/"
+        f"api/area/csv/{NASA_KEY}/{sensor}/world/{time_range}"
+    )
+
+    logger.info(f"Fetching data for sensor: {sensor}")
+
+
+    fires_df = pd.read_csv(url)
+
+    # Check if the DataFrame is empty
+    if fires_df.empty:
+        logger.warning(f"No data found for sensor: {sensor} with time range: {time_range}")
+        raise ValueError(f"No data found for sensor: {sensor} with time range: {time_range}")
+
+    # inject SOURCE and DAY_RANGE
+    fires_df["SOURCE"]  = sensor
+    fires_df["DAY_RANGE"] = time_range
+
+    fires_filtered_df = fires_df[["SOURCE", "DAY_RANGE", "latitude", "longitude", "acq_date", "acq_time", "confidence", "instrument"]].copy()
+
+    return fires_filtered_df
+
 
 
 def setup_auth():
@@ -138,6 +223,7 @@ def setup_auth():
     # If not set, please check README for further information.
     client_id = os.getenv("CLIENT_ID")
     client_secret = os.getenv("CLIENT_SECRET")
+
 
     # Create a session
     client = BackendApplicationClient(client_id=client_id)
@@ -163,11 +249,19 @@ def retrieve_eonet_cross_reference():
     wildfire_url = "https://eonet.gsfc.nasa.gov/api/v3/categories/wildfires"
     response = requests.get(url=wildfire_url)
     data = response.json()
-    with open('./events/categories.json', 'w', encoding='utf-8') as f:
+
+    # Ensure events directory exists
+    events_dir = resolve_path("events")
+    os.makedirs(events_dir, exist_ok=True)
+
+    categories_path = os.path.join(events_dir, "categories.json")
+    with open(categories_path, 'w', encoding='utf-8') as f:
          json.dump(data, f, ensure_ascii=False, indent=4)
 
 
-def extract_eonet_coordinates(file_path='./events/categories.json'):
+def extract_eonet_coordinates(file_path=None):
+    if file_path is None:
+        file_path = resolve_path('events/categories.json')
     """Extracts coordinates from the EONET categories JSON file.
 
     Args:
@@ -197,7 +291,9 @@ def extract_eonet_coordinates(file_path='./events/categories.json'):
         logger.error(f"Error extracting coordinates: {e}")
         return None
 
-def extract_time_ranges_from_eonet(file_path='./events/categories.json'):
+def extract_time_ranges_from_eonet(file_path=None):
+    if file_path is None:
+        file_path = resolve_path('events/categories.json')
     """Extracts time ranges from the EONET categories JSON file and converts them to the required format.
 
     Args:
@@ -230,7 +326,7 @@ def extract_time_ranges_from_eonet(file_path='./events/categories.json'):
         logger.error(f"Error extracting time ranges: {e}")
         return []
 
-def write_image(response, metadata, location=None, use_gcs=False):
+def write_image( response, metadata, source: Source, location=None, use_gcs=False):
     """Writes image data from an API response to a file or GCS.
 
     This function extracts image data (e.g., TIFF) from the response object and writes it to a file
@@ -264,7 +360,7 @@ def write_image(response, metadata, location=None, use_gcs=False):
 
                 # Create GCS path
                 date_str = datetime.now().strftime('%Y%m%d')
-                gcs_path = f"raw_data/eonet/to_process/{date_str}/{location.geohash}.{output_format}"
+                gcs_path = f"raw_data/{source}/to_process/{date_str}/{location.geohash}.{output_format}"
 
                 # Get content type
                 content_type = metadata.get('output', {}).get('format', 'image/png')
@@ -283,7 +379,15 @@ def write_image(response, metadata, location=None, use_gcs=False):
                 raise
         else:
             # Save locally
-            filename = f"./data/eonet_fire_events/{location.geohash}.{output_format}"
+            if source == Source.FIRMS:
+                # For FIRMS, save to firms directory
+                directory = get_firms_dir()
+                os.makedirs(directory, exist_ok=True)
+                filename = os.path.join(directory, f"{location.geohash}.{output_format}")
+            elif source == Source.EONET:
+                directory = get_eonet_dir()
+                os.makedirs(directory, exist_ok=True)
+                filename = os.path.join(directory, f"{location.geohash}.{output_format}")
 
             # Write the response content data to a image file
             with open(filename, 'wb') as f:
@@ -329,7 +433,55 @@ class Location:
         geohash = pgh.encode(latitude=coordinates[0], longitude=coordinates[1])
         return geohash
 
-def create_locations(amount=135, progress_tracker=None):
+def extract_firms_data(file_path=None):
+    """Extracts both time ranges and coordinates from the FIRMS data.
+
+    This function processes the FIRMS database and extracts time ranges and coordinates
+    from the same rows.
+
+    Returns:
+        tuple: A tuple containing:
+            - time_ranges (list): [{"from": "YYYY-MM-DDTHH:MM:SSZ", "to": "YYYY-MM-DDTHH:MM:SSZ"}]
+            - coordinates (list): [[lon, lat], [lon, lat], ...]
+    """
+    try:
+        if file_path is None:
+            file_path = resolve_path("events/firms")
+        folder = Path(file_path).resolve()
+
+        # Concatenate all JSON files in the folder
+        if not folder.exists():
+            raise FileNotFoundError(f"Folder {file_path} does not exist.")
+
+        dfs = [pd.read_json(file) for file in folder.glob("*.json")]
+        df = pd.concat(dfs, ignore_index=True)
+
+        # Extract time ranges and coordinates from the DataFrame
+        time_ranges = []
+        coordinates = []
+
+        print(f"Extracting FIRMS data from {len(df)} rows...")
+        for row in df.itertuples():
+            # Extract time range
+            start_time = pd.to_datetime(str(row.acq_date) + str(row.acq_time), format='%Y-%m-%d%H%M').strftime('%Y-%m-%dT%H:%M:%SZ')
+            end_time = (pd.to_datetime(start_time) + pd.Timedelta(days=2)).strftime('%Y-%m-%dT%H:%M:%SZ')
+            time_ranges.append({"from": start_time, "to": end_time})
+
+            # Extract coordinates
+            lon = row.longitude
+            lat = row.latitude
+            coordinates.append([lon, lat])
+        print(f"Extracted {len(time_ranges)} time ranges and {len(coordinates)} coordinates from FIRMS data.")
+
+
+        return time_ranges, [coordinates]
+
+    except Exception as e:
+        logger.error(f"Error extracting FIRMS data: {e}")
+        return [], []
+
+
+def create_locations( source:Source, amount=135, progress_tracker=None,):
     """Creates a list of Location objects based on data in event directory.
 
     This function extracts time ranges and coordinates from the EONET wildfire data and future FIRMS database
@@ -345,9 +497,18 @@ def create_locations(amount=135, progress_tracker=None):
     """
     # list of dict entries in the form {'from': '2023-08-05T17:59:00Z', 'to': '2023-08-07T17:59:00Z'}
     locations = []
+    coordinates = []
+    time_ranges = []
 
-    time_ranges = extract_time_ranges_from_eonet()
-    coordinates = extract_eonet_coordinates()
+    if source == Source.EONET:
+        time_ranges = extract_time_ranges_from_eonet()
+        coordinates = extract_eonet_coordinates()
+    elif source == Source.FIRMS:
+        time_ranges, coordinates = extract_firms_data()
+
+
+    print(f"Extracted {len(time_ranges)} {source} time ranges and {len(coordinates[0])} coordinates.")
+
 
     # Get resume point if using progress tracker
     start_entry = 0
@@ -402,13 +563,13 @@ def copernicus_query(use_gcs=False, amount=135):
     This function uses an inline evaluation script to process Sentinel-2 bands of interest
     and retrieves data for a specified bounding box and time range. If the option is used, the data is uploaded to GCS.
 
-    Sentiel-2 bands of interest
+    Sentinel-2 bands of interest
     B02: Blue
     B03: Green
     B04: Red
     B08: Visible and Near Infared (VNIR)
 
-    Sentiel-3 bands of interest
+    Sentinel-3 bands of interest
 
     Args:
         use_gcs (bool): Whether to upload images to GCS instead of saving locally
@@ -420,84 +581,100 @@ def copernicus_query(use_gcs=False, amount=135):
     # Need a valid eval script, specified bands, specified data range
     ACCESS_TOKEN = setup_auth()
     headers={f"Authorization" : f"Bearer {ACCESS_TOKEN}"}
+    locations = {}
+
 
     # Initialize progress tracker
     progress_tracker = ProgressTracker()
 
-    locations = create_locations(amount=amount, progress_tracker=progress_tracker)
+    # Create locations from FIRMS data
+    try:
+        firms_locations = create_locations(source=Source.FIRMS, amount=amount, progress_tracker=progress_tracker)
+        locations[Source.FIRMS]= firms_locations
+    except Exception as e:
+        logger.warning(f"{e}: FIRMS location creation failed. Have you run --nasa-firms yet?")
+
+    # Create locations from EONET data
+    try:
+        eonet_locations = create_locations(source=Source.EONET, amount=amount, progress_tracker=progress_tracker)
+        locations[Source.EONET] = eonet_locations
+    except Exception as e:
+        logger.warning(f"{e}: EONET location creation failed. Have you run --eonet-crossref yet?")
 
     logger.info(f"Will process {len(locations)} unprocessed locations")
 
+    if not locations:
+        logger.warning(f"No locations were created. Something went terribly wrong.")
+        return
+
     # Example code how to query copernicus sentiel 2 data and do explcit image processing evals with inline script.
-    # Currently reading from the eo_net wildfire json file.
-
-
     sensor = "sentinel-2-l2a"
 
-    for location in locations:
-        # Update progress for this specific location
-        try:
-            evalscript = """
-            //VERSION=3
-            function setup() {
-            return {
-                    input: [ "B08", "B04", "B03", "B02"],
-                    output: {
-                    bands: 4
+    for source, locations in locations.items():
+        for location in locations:
+            # Update progress for this specific location
+            try:
+                evalscript = """
+                //VERSION=3
+                function setup() {
+                return {
+                        input: [ "B08", "B04", "B03", "B02"],
+                        output: {
+                        bands: 4
+                        },
+
+                    };
+                }
+
+                function evaluatePixel(sample) {
+                return [2.5 * sample.B08, 2.5 * sample.B04, 2.5 * sample.B03, 2.5 * sample.B02];
+                }
+                """
+
+
+                request = {
+                    "input": {
+                        "bounds": {
+                            # "properties": {"crs": "http://www.opengis.net/def/crs/EPSG/0/32633"},
+                            # "bbox": [13, 45, 14, 46],
+                            "bbox": location.bbox['bbox']
+
+                        },
+                        "data": [
+                            {
+                                "type": sensor,
+                                "dataFilter": {
+                                    "timeRange": {
+                                        "from": location.time["from"],
+                                        "to": location.time["to"],
+                                    }
+                                },
+                            }
+                        ],
                     },
-
-                };
-            }
-
-            function evaluatePixel(sample) {
-            return [2.5 * sample.B08, 2.5 * sample.B04, 2.5 * sample.B03, 2.5 * sample.B02];
-            }
-            """
-
-
-            request = {
-                "input": {
-                    "bounds": {
-                        # "properties": {"crs": "http://www.opengis.net/def/crs/EPSG/0/32633"},
-                        # "bbox": [13, 45, 14, 46],
-                        "bbox": location.bbox['bbox']
-
+                    "output": {
+                        "width": 512,
+                        "height": 512,
+                        "format": "image/tiff"
                     },
-                    "data": [
-                        {
-                            "type": sensor,
-                            "dataFilter": {
-                                "timeRange": {
-                                    "from": location.time["from"],
-                                    "to": location.time["to"],
-                                }
-                            },
-                        }
-                    ],
-                },
-                "output": {
-                    "width": 512,
-                    "height": 512,
-                    "format": "image/tiff"
-                },
-                "evalscript": evalscript,
-            }
-            url = "https://sh.dataspace.copernicus.eu/api/v1/process"
-            response = requests.post(url, json=request, headers=headers)
+                    "evalscript": evalscript,
+                }
+                url = "https://sh.dataspace.copernicus.eu/api/v1/process"
+                response = requests.post(url, json=request, headers=headers)
 
-            if response.status_code == 200:
-                write_image(response, metadata=request, location=location, use_gcs=use_gcs)
-                # Mark location as completed
-                progress_tracker.update_event_progress(location.geohash, location_index=0, status="completed")
-                logger.info(f"Completed location {location.geohash}")
-            else:
-                # Mark location as failed
+                if response.status_code == 200:
+                    write_image(response, metadata=request, location=location, use_gcs=use_gcs, source=source)
+                    # Mark location as completed
+                    progress_tracker.update_event_progress(location.geohash, location_index=0, status="completed")
+                    logger.info(f"Completed location {location.geohash}")
+                else:
+                    # Mark location as failed
+                    progress_tracker.update_event_progress(location.geohash, location_index=0, status="failed")
+                    logger.error(f"{response.status_code}: error in request for {location.geohash}, outputting content for debugging {response.content}")
+            except Exception as e:
+                # Mark location as failed on any exception
                 progress_tracker.update_event_progress(location.geohash, location_index=0, status="failed")
-                logger.error(f"{response.status_code}: error in request for {location.geohash}, outputting content for debugging {response.content}")
-        except Exception as e:
-            # Mark location as failed on any exception
-            progress_tracker.update_event_progress(location.geohash, location_index=0, status="failed")
-            logger.error(f"Exception processing location {location.geohash}: {e}")
+                logger.error(f"Exception processing location {location.geohash}: {e}")
 
 def batch_data_downloader_selenium(url=None, max_pages=9):
     """Downloads images from a Flickr album using Selenium.
@@ -511,7 +688,7 @@ def batch_data_downloader_selenium(url=None, max_pages=9):
     """
     # TODO: Hardcoded url for now, if needed expose this for customization
     url = "https://www.flickr.com/photos/esa_events/albums/72157716491073681/"
-    destination = "../data/labeled/no"
+    destination = resolve_path("data/labeled/no")
     driver = webdriver.Chrome()  # Make sure you have chromedriver installed
     driver.get(url)
     downloaded = 0
@@ -580,12 +757,12 @@ def convert_sen2fire_labeled(root_dir=None, output_dir=None, use_nir=False):
 
     for scene, label in scenes.items():
         scene_path = os.path.join(root_dir, scene)
-        
+
         # Check if scene directory exists
         if not os.path.exists(scene_path):
             logger.warning(f"Scene directory not found: {scene_path}")
             continue
-            
+
         try:
             npz_files = [f for f in os.listdir(scene_path) if f.endswith(".npz")] # collect all the .npz files in the folder
         except Exception as e:
@@ -598,7 +775,7 @@ def convert_sen2fire_labeled(root_dir=None, output_dir=None, use_nir=False):
                 data = np.load(fpath) # loading the data
                 img = data["image"]  # shape: (12, H, W) -- 13 bands with 512 x 512 patches
                 mask = data["label"]  # shape: (H, W)
-                
+
                 logger.debug(f"Processing {fname}: image shape {img.shape}, mask shape {mask.shape}")
 
                 # if fire is present if the pixel is 1
@@ -631,7 +808,7 @@ def convert_sen2fire_labeled(root_dir=None, output_dir=None, use_nir=False):
                 # Normalize to 0–255 for transferring into numpy img
                 img_min, img_max = img_crop.min(), img_crop.max()
                 logger.debug(f"Image value range before normalization: min={img_min}, max={img_max}")
-                
+
                 img_norm = (img_crop / img_crop.max()) * 255 # img content comes from img_norm array
                 img_norm = img_norm.astype(np.uint8) # image pixel values
                 logger.debug(f"After normalization: min={img_norm.min()}, max={img_norm.max()}")
