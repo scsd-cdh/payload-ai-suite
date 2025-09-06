@@ -7,6 +7,10 @@ import requests
 import json
 import time
 import os
+import traceback
+import pathlib
+import math
+import re
 
 
 from mlops import GCSHandler
@@ -504,246 +508,243 @@ def copernicus_sentiel_query(use_gcs=False, amount=135):
             print(f"Exception processing location {location.geohash}: {e}")
 
 
-def enmap_selenium_login():
-    """
-    Logs into the EOWEB GeoPortal via Selenium and returns a Selenium browser instance.
-
-    Returns: driver
-
-    """
-
-    from dotenv import load_dotenv
-    load_dotenv()
-
-    # Load env variables
-    username = os.getenv("ENMAP_USERNAME")
-    password = os.getenv("ENMAP_PASSWORD")
-
-    if not username or not password:
-        raise ValueError("ENMAP_USERNAME and ENMAP_PASSWORD must be set in .env")
-
-    # Set up Chrome instance
-    options = Options()
-    options.add_argument("--start-maximized")
-
-    # Go to URL
-    driver = webdriver.Chrome(options=options)
-    driver.get("https://sso.eoc.dlr.de/eoc/auth/login?service=https%3A%2F%2Feoweb.dlr.de%2Fegp%2Flogin%2Fcas")
-
-    # Wait and fill login form information
-    WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.NAME, "username")))
-    driver.find_element(By.NAME, "username").send_keys(username)
-    driver.find_element(By.NAME, "password").send_keys(password)
-    driver.find_element(By.NAME, "submitBtn").click()
-
-    # Wait for redirect to EOWEB
-    time.sleep(5)
-    if "eoweb.dlr.de/egp/main" in driver.current_url:
-        print("[ENMAP] Successfully logged into EOWEB.")
-    else:
-        print("[ENMAP] Login may have failed. Current URL:", driver.current_url)
-
-    return driver
+STAC_URL = "https://geoservice.dlr.de/eoc/ogc/stac/v1"
+ENMAP_COLLECTION = "ENMAP_HSI_L2A"
 
 
-def set_time_range(driver, start_date, end_date):
-    """
-    This is a helper function to set the location time ranges for EOWEB search
+def km_to_deg_latlon(radius_km: float, lat_deg: float):
+    """Convert a distance in kilometers to degree offsets in latitude and longitude."""
+    dlat = radius_km / 111.32
+    lat_clamped = max(min(lat_deg, 89.9999), -89.9999)
+    dlon = radius_km / (111.32 * math.cos(math.radians(lat_clamped)))
+    return dlat, dlon
 
-    Args:
-        driver: selenium webdriver instance
-        start_date: start date based on location
-        end_date: end date based on location
 
-    Returns: None
+def bbox_around_point(lon: float, lat: float, radius_km: float):
+    """Create a bounding box around a point given longitude, latitude, and radius (km)."""
+    dlat, dlon = km_to_deg_latlon(radius_km, lat)
+    return [lon - dlon, lat - dlat, lon + dlon, lat + dlat]
 
-    """
 
-    try:
-        # Wait til elements load into DOM
-        WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.ID, "startDate")))
-        WebDriverWait(driver, 10).until(EC.presence_of_element_located((By.ID, "endDate")))
+def http_download(url: str, out_path: str, chunk=1 << 20):
+    """Download a file from an HTTP URL to the given output path."""
+    out_path = pathlib.Path(out_path)
+    out_path.parent.mkdir(parents=True, exist_ok=True)
+    with requests.get(url, stream=True, timeout=120) as r:
+        r.raise_for_status()
+        with open(out_path, "wb") as f:
+            for part in r.iter_content(chunk_size=chunk):
+                if part:
+                    f.write(part)
+    return str(out_path)
 
-        # Locate elements
-        start_input = driver.find_element(By.ID, "startDate")
-        end_input = driver.find_element(By.ID, "endDate")
 
-        # Clear and add new input
-        start_input.clear()
-        start_input.send_keys(start_date)
-        end_input.clear()
-        end_input.send_keys(end_date)
-        print(f"[ENMAP] Time set: {start_date} to {end_date}")
-    except Exception as e:
-        print("[ENMAP] set_time_range failed:", e)
+def stac_search(bbox, date_range, limit=25, max_items=1, sleep_s=0.2):
+    """Search the STAC API for EnMAP items matching a bounding box and date range."""
+    url = f"{STAC_URL}/search"
+    headers = {"Content-Type": "application/json"}
+    body = {"collections": [ENMAP_COLLECTION], "bbox": bbox, "datetime": date_range, "limit": limit}
+    items = []
 
-def set_bounding_box(driver, bbox):
-    """
-    Helper function to set the bounding box for EOWEB search. It uses the Advanced Map option in the portal to manually
-    set the bounding box
-
-    Args:
-        driver: selenium webdriver instance
-        bbox: bbox derived from locations
-
-    Returns: None
-
-    """
-
-    min_lon, min_lat, max_lon, max_lat = bbox
-
-    # 1. Show the advanced map
-    WebDriverWait(driver, 10).until(
-        EC.element_to_be_clickable((By.XPATH, "//button[contains(text(), 'Show Advanced Map')]"))
-    ).click()
-
-    # 2. Click the Bounding Box tab
-    WebDriverWait(driver, 10).until(
-        EC.element_to_be_clickable((By.XPATH, "//div[contains(text(), 'Bounding Box')]"))
-    ).click()
-
-    # 3. Fill in bounding box coordinates
-    WebDriverWait(driver, 10).until(
-        EC.presence_of_element_located((By.XPATH, "//input[contains(@name, 'Upper Latitude')]"))
-    )
-
-    # Clear and enter new information
-    driver.find_element(By.XPATH, "//input[contains(@name, 'Upper Latitude')]").clear()
-    driver.find_element(By.XPATH, "//input[contains(@name, 'Upper Latitude')]").send_keys(str(max_lat))
-
-    driver.find_element(By.XPATH, "//input[contains(@name, 'Lower Latitude')]").clear()
-    driver.find_element(By.XPATH, "//input[contains(@name, 'Lower Latitude')]").send_keys(str(min_lat))
-
-    driver.find_element(By.XPATH, "//input[contains(@name, 'Left Longitude')]").clear()
-    driver.find_element(By.XPATH, "//input[contains(@name, 'Left Longitude')]").send_keys(str(min_lon))
-
-    driver.find_element(By.XPATH, "//input[contains(@name, 'Right Longitude')]").clear()
-    driver.find_element(By.XPATH, "//input[contains(@name, 'Right Longitude')]").send_keys(str(max_lon))
-
-    print(f"[ENMAP] Bounding box set to: {bbox}")
-
-def select_enmap_collection(driver):
-    """
-    Selects the EnMAP collection in the filter panel.
-
-    Args:
-        driver: selenium webdriver instance
-
-    Returns: None
-
-    """
-
-    try:
-        checkbox = WebDriverWait(driver, 10).until(
-            EC.presence_of_element_located((By.XPATH, "//label[contains(text(), 'EnMAP')]//preceding-sibling::input[@type='checkbox']"))
-        )
-        if not checkbox.is_selected():
-            checkbox.click()
-            print("[ENMAP] Selected 'EnMAP-HSI (L0)' collection.")
+    while True:
+        if isinstance(body, dict):
+            resp = requests.post(url, headers=headers, json=body, timeout=60)
         else:
-            print("[ENMAP] Collection already selected.")
-    except Exception as e:
-        print("[ENMAP] Failed to select EnMAP collection:", e)
+            resp = requests.get(url, timeout=60)
 
-def click_search(driver):
-    """
-    Clicks the Search button to run the product query.
+        resp.raise_for_status()
+        data = resp.json()
+        items.extend(data.get("features", []))
 
-    Args:
-        driver: selenium webdriver instance
+        next_url = None
+        for link in data.get("links", []):
+            if link.get("rel") == "next":
+                next_url = link.get("href")
+                break
 
-    Returns: None
+        if not next_url or len(items) >= max_items:
+            break
 
-    """
+        url, body = next_url, None
+        time.sleep(sleep_s)
 
+    return items[:max_items]
+
+
+def pick_reflectance_asset(assets: dict):
+    """Select a reflectance-like asset (TIF/reflectance) from the asset dictionary."""
+    for k in ["reflectance", "surface_reflectance", "data", "enmap:reflectance", "ENMAP_REFLECTANCE"]:
+        if k in assets and "href" in assets[k]:
+            return k, assets[k]["href"]
+
+    for k, v in assets.items():
+        href = v.get("href", "")
+        if isinstance(href, str) and href.lower().endswith((".tif", ".tiff")):
+            return k, href
+
+    return None, None
+
+
+def extract_events_list(events_raw):
+    """Extract a list of event-like records from raw JSON data."""
+    if isinstance(events_raw, dict):
+        if "features" in events_raw and isinstance(events_raw["features"], list):
+            return events_raw["features"]
+        for key in ("events", "items", "data", "records", "results"):
+            if key in events_raw and isinstance(events_raw[key], list):
+                return events_raw[key]
+        return [events_raw]
+
+    if isinstance(events_raw, list):
+        return events_raw
+
+    return [events_raw]
+
+
+def parse_event_datetime_str(s: str) -> datetime:
+    """Parse an event datetime string into a datetime object."""
     try:
-        # Wait and locate button
-        search_btn = WebDriverWait(driver, 10).until(
-            EC.element_to_be_clickable((By.XPATH, "//button[normalize-space()='Search']"))
-        )
-        # Click
-        search_btn.click()
-        print("[ENMAP] Search button clicked.")
-
-        # Optional: wait for results to appear
-        WebDriverWait(driver, 10).until(
-            EC.presence_of_element_located((By.CLASS_NAME, "resultTableRow"))  # adjust if needed
-        )
-        print("[ENMAP] Search results loaded.")
-    except Exception as e:
-        print("[ENMAP] Failed to click search or load results:", e)
+        return datetime.fromisoformat(s.replace("Z", "+00:00"))
+    except Exception:
+        return datetime.strptime(s, "%Y-%m-%d")
 
 
-def prepare_enmap_search_page(driver):
+def shift_days_str(date_obj: datetime, days: int) -> str:
+    """Shift a datetime by a number of days and return as YYYY-MM-DD string."""
+    d = date_obj.date()
+    shifted = datetime.fromordinal(d.toordinal() + days)
+    return shifted.strftime("%Y-%m-%d")
+
+
+def event_date_window_from_t(t_raw, default_range: str, pad_days=3):
+    """Generate a date window string around a given timestamp."""
+    if not t_raw:
+        return default_range
     try:
-        # Wait until the 'Clear Filters' button is visible — that's your stable anchor
-        WebDriverWait(driver, 20).until(
-            EC.element_to_be_clickable((By.XPATH, "//button[normalize-space()='Clear Filters']"))
-        )
-        print("[ENMAP] Search page loaded and filters visible.")
-    except Exception as e:
-        print("[ENMAP] Failed to prepare search page:", e)
-        raise
-
-def enmap_fire_query(amount=135, use_gcs=False):
-    """
-    Simulates querying EnMAP data for fire locations from EONET events.
-    This mirrors copernicus_sentiel_query but prepares EnMAP download logic.
-
-    Args:
-        amount (int): Number of fire locations to process
-        use_gcs (bool): Whether to upload to Google Cloud Storage
-    """
-
-    # Login
-    driver = enmap_selenium_login()
-    #prepare_enmap_search_page(driver)
-
-    # Load fire events and initialize
-    progress_tracker = ProgressTracker()
-    locations = create_locations(amount=amount, progress_tracker=progress_tracker)
-    print(f"Will process {len(locations)} unprocessed locations")
+        dt_obj = parse_event_datetime_str(str(t_raw))
+        start = shift_days_str(dt_obj, -pad_days)
+        end = shift_days_str(dt_obj, pad_days)
+        return f"{start}/{end}"
+    except Exception:
+        return default_range
 
 
-    for location in locations:
+def normalize_event(ev):
+    """Normalize various event formats into (lat, lon, time_str)."""
+    lat = lon = t = None
+
+    if isinstance(ev, str):
+        nums = re.findall(r"[-+]?\d+(?:\.\d+)?", ev)
+        if len(nums) >= 2:
+            a, b = float(nums[0]), float(nums[1])
+            if abs(a) <= 90 and abs(b) <= 180:
+                lat, lon = a, b
+            else:
+                lon, lat = a, b
+        return lat, lon, t
+
+    if isinstance(ev, dict):
+        for la, lo in (("latitude", "longitude"), ("lat", "lon")):
+            if la in ev and lo in ev:
+                lat, lon = float(ev[la]), float(ev[lo])
+                t = ev.get("time") or ev.get("date")
+                return lat, lon, t
+
+        geom_seq = ev.get("geometry")
+        if isinstance(geom_seq, list) and geom_seq:
+            g = geom_seq[-1]
+            if isinstance(g, dict):
+                coords = g.get("coordinates")
+                if isinstance(coords, (list, tuple)) and len(coords) >= 2:
+                    lon, lat = float(coords[0]), float(coords[1])
+                t = g.get("date") or g.get("time") or ev.get("time") or ev.get("date")
+                if lat is not None and lon is not None:
+                    return lat, lon, t
+
+        geom = ev.get("geometry")
+        if isinstance(geom, dict):
+            coords = geom.get("coordinates")
+            if isinstance(coords, (list, tuple)) and len(coords) >= 2:
+                lon, lat = float(coords[0]), float(coords[1])
+                props = ev.get("properties", {})
+                if isinstance(props, dict):
+                    t = props.get("date") or props.get("time") or props.get("datetime")
+                else:
+                    t = ev.get("time") or ev.get("date")
+                return lat, lon, t
+
+        coords = ev.get("coordinates")
+        if isinstance(coords, (list, tuple)) and len(coords) >= 2:
+            lon, lat = float(coords[0]), float(coords[1])
+            t = ev.get("time") or ev.get("date")
+            return lat, lon, t
+
+    return None, None, None
+
+
+def load_events(json_path: str):
+    """Load events from a JSON file and return as a list."""
+    with open(json_path, "r", encoding="utf-8") as f:
+        raw = json.load(f)
+    return extract_events_list(raw)
+
+
+def enmap_fetch_for_events(
+    events_json_path: str = "events/categories.json",
+    out_root: str = "data/enmap",
+    default_date_range: str = "2024-01-01/2024-12-31",
+    radius_km: float = 10.0,
+    per_event_limit: int = 1,
+    sleep_between_events: float = 0.2
+):
+    """Download EnMAP products for events from a JSON file using STAC search."""
+    events = load_events(events_json_path)
+    downloaded, failures = [], []
+
+    print(f"[ENMAP] loaded {len(events)} records from {events_json_path}")
+    if events:
+        print(f"[ENMAP] first record type: {type(events[0]).__name__}")
+
+    for idx, ev in enumerate(events):
         try:
-            print(f"[ENMAP] Processing {location.geohash}")
+            lat, lon, t = normalize_event(ev)
+            if lat is None or lon is None:
+                print(f"[ENMAP] skip event {idx}: could not find lat/lon in record")
+                failures.append({"index": idx, "reason": "no_latlon"})
+                continue
 
-            # Clear filters
-            try:
-                clear_btn = WebDriverWait(driver, 20).until(
-                    EC.element_to_be_clickable((By.XPATH, "//button[normalize-space()='Clear Filters']"))
-                )
-                clear_btn.click()
-                print("[ENMAP] Cleared previous filters.")
-            except Exception as e:
-                print(f"[ENMAP] Failed to clear filters: {e}")
+            bbox = bbox_around_point(float(lon), float(lat), radius_km)
+            date_range = event_date_window_from_t(t, default_date_range)
+            print(f"[ENMAP] event {idx}: bbox={bbox} date_range={date_range}")
 
-            try:
-                set_time_range(driver, location.time["from"], location.time["to"])
-            except Exception as e:
-                print(f"[ENMAP] set_time_range failed: {e}")
+            items = stac_search(bbox=bbox, date_range=date_range, max_items=per_event_limit)
+            if not items:
+                print(f"[ENMAP] event {idx}: no items found")
+                failures.append({"index": idx, "reason": "no_items"})
+                time.sleep(sleep_between_events)
+                continue
 
-            try:
-                set_bounding_box(driver, location.bbox["bbox"])
-            except Exception as e:
-                print(f"[ENMAP] set_bounding_box failed: {e}")
+            for j, it in enumerate(items):
+                assets = it.get("assets", {}) if isinstance(it, dict) else {}
+                key, href = pick_reflectance_asset(assets)
+                if not href:
+                    print(f"[ENMAP] event {idx}: no reflectance-like asset, keys={list(assets.keys())}")
+                    failures.append({"index": idx, "reason": "no_reflectance_asset"})
+                    continue
 
-            try:
-                select_enmap_collection(driver)
-            except Exception as e:
-                print(f"[ENMAP] select_enmap_collection failed: {e}")
+                ev_dir = os.path.join(out_root, f"event_{idx}")
+                fn = os.path.basename(href.split("?")[0]) or f"enmap_{idx}_{j}.tif"
+                path = http_download(href, os.path.join(ev_dir, fn))
+                print(f"[ENMAP] event {idx}: downloaded {key} -> {path}")
+                downloaded.append({"index": idx, "asset_key": key, "path": path, "href": href})
 
-            try:
-                click_search(driver)
-            except Exception as e:
-                print(f"[ENMAP] click_search failed: {e}")
-
-            results = driver.find_elements(By.CLASS_NAME, "resultTableRow")
-            print(f"[ENMAP] Found {len(results)} results for {location.geohash}")
+            time.sleep(sleep_between_events)
 
         except Exception as e:
-            print(f"[ENMAP] Unhandled error for {location.geohash}: {e}")
+            print(f"[ENMAP] event {idx}: error {type(e).__name__}: {e}")
+            failures.append({"index": idx, "reason": f"{type(e).__name__}: {e}"})
+
+    return {"downloaded": downloaded, "failures": failures}
 
 
 def batch_data_downloader_selenium(url=None, max_pages=9):

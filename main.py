@@ -10,7 +10,7 @@ from fetch import (
     batch_data_downloader_selenium,
     retrieve_eonet_cross_reference,
     copernicus_sentiel_query,
-    enmap_fire_query
+    enmap_fetch_for_events,
 )
 
 if __name__ == "__main__":
@@ -53,7 +53,13 @@ if __name__ == "__main__":
     parser.add_argument('--multimodal-qc', required=False, action='store_true', help="Run multimodal quality control check")
     parser.add_argument('--use-gcs', required=False, action='store_true', help="Stream training data from Google Cloud Storage")
     parser.add_argument('--cloud-mask', required=False, action='store_true', help="Export OmniCloudMask models to ONNX and test on labeled data")
-    parser.add_argument('--enmap-query', required=False, action='store_true', help="Cross-reference wildfire events and query EnMAP via CAS login")
+    parser.add_argument("--enmap-for-events", action="store_true", help="Find and download EnMAP L2A near each event")
+    parser.add_argument("--events-json", type=str, default="events/categories.json", help="Path to the JSON file containing event records (default: events/categories.json)")
+    parser.add_argument("--date-range", type=str, default="2024-01-01/2024-12-31", help="Date range to search for EnMAP products in the format 'YYYY-MM-DD/YYYY-MM-DD'")
+    parser.add_argument("--radius-km", type=float, default=10.0, help="Radius in kilometers around each event's coordinates to use when querying for imagery "
+    "(default: 10.0 km)")
+    parser.add_argument("--per-event-limit", type=int, default=1, help="Maximum number of EnMAP images to download per event (default: 1)")
+    parser.add_argument("--out-enmap", type=str, default="data/enmap", help="Output directory where downloaded EnMAP images will be stored (default: data/enmap)")
 
     args = parser.parse_args()
     if args.run_model:
@@ -72,8 +78,16 @@ if __name__ == "__main__":
         mlops.run_multimodal_qc(use_gcs=args.use_gcs)
     elif args.cloud_mask:
         cloud.main()
-    elif args.enmap_query:
-        enmap_fire_query(use_gcs=args.use_gcs)
+    elif args.enmap_for_events:
+        result = enmap_fetch_for_events(
+            events_json_path=args.events_json,
+            out_root=args.out_enmap,
+            default_date_range=args.date_range,
+            radius_km=args.radius_km,
+            per_event_limit=args.per_event_limit
+        )
+        print("[ENMAP] Summary:",
+              f"{len(result['downloaded'])} downloads, {len(result['failures'])} failures")
     else:
         print("No valid arguments provided. Use -h for help.")
 
