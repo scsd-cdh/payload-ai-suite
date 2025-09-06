@@ -18,6 +18,8 @@ dependencies = [
     "pydantic>=2.0.0",
     "pygeohash==3.0.1",
     "pyproj==3.7.1",
+    "pywavelets>=1.8.0",
+    "rawpy>=0.25.1",
     "requests==2.32.3",
     "requests-oauthlib==2.0.0",
     "scikit-learn==1.6.1",
