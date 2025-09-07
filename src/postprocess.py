@@ -329,6 +329,7 @@ def rgb_decompression(compressed_data: bytes, image_shape: Tuple[int, int, int],
 
 def test_ccds(input_image_path: str):
     """Test CCDS compression."""
+    #  To find a raw .NEF image for testing, refer to https://shotkit.com/free-raw-photos
     image_path = Path(input_image_path)
     output_path = Path("output")
     output_path.mkdir(parents=True, exist_ok=True)
