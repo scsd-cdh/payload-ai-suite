@@ -108,19 +108,19 @@ def train(validate=True, epochs=12, use_nir=False, use_gcs=False,
 
     weights = 'imagenet' if input_channels == 3 else None
 
-    vgg = tf.keras.applications.vgg16.VGG16(
+    resnet50 = tf.keras.applications.resnet.ResNet50(
         weights=weights,
         include_top=False,
         input_shape=input_shape
     )
-    #since VGG16 is pre-trained w/ 3-channel RGB images, this if-else ensure it runs on a 4-channel system
+    #since ResNet50 is pre-trained w/ 3-channel RGB images, this if-else ensure it runs on a 4-channel system
 
     # Here we freeze the last 4 layers
     # Layers are set to trainable as True by default
-    for layer in vgg.layers:
+    for layer in resnet50.layers:
         layer.trainable = False
 
-    for (i, layer) in enumerate(vgg.layers):
+    for (i, layer) in enumerate(resnet50.layers):
         logger.info(f"{i} {layer.__class__.__name__} {layer.trainable}")
 
     def create_top(bottom_model, num_classes):
@@ -133,8 +133,8 @@ def train(validate=True, epochs=12, use_nir=False, use_gcs=False,
         return output
 
     num_classes = 2
-    head = create_top(vgg, num_classes)
-    model = keras.models.Model(inputs=vgg.input, outputs=head)
+    head = create_top(resnet50, num_classes)
+    model = keras.models.Model(inputs=resnet50.input, outputs=head)
 
     model.summary(print_fn=logger.info)
     model.compile(optimizer='adam', loss='categorical_crossentropy', metrics=['accuracy'])
