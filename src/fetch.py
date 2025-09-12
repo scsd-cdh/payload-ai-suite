@@ -183,7 +183,7 @@ def fetch_sensor_data(sensor, time_range) -> pd.DataFrame:
     NASA_KEY = os.getenv("NASA_KEY")
 
     if not NASA_KEY:
-        raise RuntimeError("Please set NASA_KEY in your .env file.")
+        raise RuntimeError("Please set NASA_KEY in your environment variables.")
 
     url = (
         f"https://firms.modaps.eosdis.nasa.gov/"
@@ -463,7 +463,7 @@ def extract_firms_data(file_path=None):
         print(f"Extracting FIRMS data from {len(df)} rows...")
         for row in df.itertuples():
             # Extract time range
-            start_time = pd.to_datetime(str(row.acq_date) + str(row.acq_time), format='%Y-%m-%d%H%M').strftime('%Y-%m-%dT%H:%M:%SZ')
+            start_time = pd.to_datetime(str(row.acq_date) + str(row.acq_time).zfill(4), format='%Y-%m-%d%H%M').strftime('%Y-%m-%dT%H:%M:%SZ')
             end_time = (pd.to_datetime(start_time) + pd.Timedelta(days=2)).strftime('%Y-%m-%dT%H:%M:%SZ')
             time_ranges.append({"from": start_time, "to": end_time})
 
