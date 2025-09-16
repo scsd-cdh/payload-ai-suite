@@ -1,4 +1,4 @@
-"""VGG base model, 2 classes. First layers removed
+"""Resnet50 base model, 2 classes. First layers removed
 
 Features:
 - train
@@ -34,7 +34,7 @@ logger = logging.getLogger(__name__)
 def train(validate=True, epochs=12, use_nir=False, use_gcs=False, 
           use_mixed_res=False, mixed_res_config=None):
     """
-    Train CNN VGG model on labeled data.
+    Train CNN ResNet50 model on labeled data.
 
     Args:
         validate (bool): Whether to validate the model after training.
