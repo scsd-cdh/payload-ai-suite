@@ -5,7 +5,8 @@ import logging
 import tempfile
 import time
 from typing import List, Optional
-
+import numpy as np
+import cv2
 
 from google import genai
 from google.cloud import storage
@@ -112,6 +113,82 @@ class GCSHandler:
             self.logger.error(f"Failed to list images with prefix {prefix}: {str(e)}")
             return []
 
+    def delete_blob(self, gcs_path: str) -> bool:
+        """Delete a blob from GCS bucket.
+
+        Args:
+            gcs_path: Path in GCS bucket to delete.
+
+        Returns:
+            bool: True if deletion successful, False otherwise.
+        """
+        try:
+            # Get blob metadata to verify it's an actual file
+            blob = self.bucket.blob(gcs_path)
+
+            # Check if blob exists
+            if not blob.exists():
+                self.logger.warning(f"Blob does not exist: {gcs_path}")
+                return False
+
+            # Reload to get metadata
+            blob.reload()
+
+            # Safety check: verify it has a size (actual file content)
+            # Empty "directory" placeholders often have size 0
+            if blob.size == 0:
+                self.logger.warning(f"Refusing to delete zero-size blob (might be placeholder): {gcs_path}")
+                return False
+
+            # Additional safety: check for known image extensions
+            valid_extensions = ['.png', '.jpg', '.jpeg', '.tiff', '.tif', '.bmp']
+            if not any(gcs_path.lower().endswith(ext) for ext in valid_extensions):
+                self.logger.warning(f"Refusing to delete non-image file: {gcs_path}")
+                return False
+
+            blob.delete()
+            self.logger.info(f"Successfully deleted {gcs_path}")
+            return True
+        except Exception as e:
+            self.logger.error(f"Failed to delete {gcs_path}: {str(e)}")
+            return False
+
+def is_image_empty(image_data):
+    """Check if an image is empty (all black pixels).
+
+    Args:
+        image_data: Either a file path (str) or bytes data.
+
+    Returns:
+        bool: True if image is empty (all black), False otherwise.
+    """
+    try:
+        if isinstance(image_data, str):
+            # Load image from file path
+            img = cv2.imread(image_data, cv2.IMREAD_UNCHANGED)
+        else:
+            # Load image from bytes
+            nparr = np.frombuffer(image_data, np.uint8)
+            img = cv2.imdecode(nparr, cv2.IMREAD_UNCHANGED)
+
+        if img is None:
+            logging.error("Failed to load image for empty check")
+            return False
+
+        # Check if all pixels are black (0)
+        # This works for grayscale, RGB, and RGBA images
+        is_empty = np.all(img == 0)
+
+        if is_empty:
+            logging.info("Image detected as empty (all black pixels)")
+
+        return is_empty
+
+    except Exception as e:
+        logging.error(f"Error checking if image is empty: {str(e)}")
+        # In case of error, assume not empty to avoid false positives
+        return False
+
 def multimodal_qc(file_input, file_name=None, use_gcs=False, gcs_handler=None):
     """Performs a multimodal quality control check on an image using Gemini.
 
@@ -139,6 +216,12 @@ def multimodal_qc(file_input, file_name=None, use_gcs=False, gcs_handler=None):
             raise ValueError("file_name must be provided when file_input is bytes")
 
     print(f"Processing file: {file_name}")
+
+    # Check if image is empty before processing
+    if is_image_empty(file_input):
+        logging.warning(f"Skipping {file_name} - image is empty (all black pixels)")
+        print(f"Skipped {file_name} - empty image detected")
+        return "skipped_empty"
 
     # Upload to Gemini API - handle both file path and bytes
     if isinstance(file_input, str):
@@ -219,14 +302,14 @@ def multimodal_qc(file_input, file_name=None, use_gcs=False, gcs_handler=None):
         destination_path = os.path.join(local_output_dir, file_name)
 
         if isinstance(file_input, str):
-            # Direct file copy for local storage
-            shutil.copy(file_input, destination_path)
+            # Move file instead of copy for local storage
+            shutil.move(file_input, destination_path)
         else:
             # Write bytes data to local file
             with open(destination_path, 'wb') as f:
                 f.write(file_input)
 
-        print(f"File saved to: {destination_path}")
+        print(f"File moved to: {destination_path}")
 
     return binary_output
 
@@ -274,7 +357,14 @@ def run_multimodal_qc(use_gcs=False, input_path=None):
 
                 # Run QC on streamed image
                 try:
-                    multimodal_qc(image_bytes, file_name, use_gcs=True, gcs_handler=gcs_handler)
+                    result = multimodal_qc(image_bytes, file_name, use_gcs=True, gcs_handler=gcs_handler)
+                    if result == "skipped_empty":
+                        logging.info(f"Skipped empty image: {file_name}")
+                        # Delete the empty image from GCS
+                        gcs_handler.delete_blob(gcs_path)
+                    elif result in ["fire", "no fire"]:
+                        # Successfully processed and moved - delete original
+                        gcs_handler.delete_blob(gcs_path)
                 except Exception as e:
                     logging.error(f"Error processing {file_name}: {str(e)}")
                     continue
@@ -305,7 +395,9 @@ def run_multimodal_qc(use_gcs=False, input_path=None):
         if GEMINI_AVAILABLE:
             for file_path in image_files:
                 try:
-                    multimodal_qc(file_path)
+                    result = multimodal_qc(file_path)
+                    if result == "skipped_empty":
+                        logging.info(f"Skipped empty image: {file_path}")
                 except Exception as e:
                     logging.error(f"Error processing {file_path}: {str(e)}")
                     continue
