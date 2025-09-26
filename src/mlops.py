@@ -8,6 +8,8 @@ from typing import List, Optional
 import numpy as np
 import cv2
 
+from fetch import Source
+
 from google import genai
 from google.cloud import storage
 from paths import get_gcs_credentials_path, resolve_path
@@ -330,79 +332,80 @@ def run_multimodal_qc(use_gcs=False, input_path=None):
             gcs_handler = GCSHandler()
             logging.info("Using GCS for multimodal QC")
 
-            # List images from GCS
-            prefix = "raw_data/eonet/to_process/"
-            image_files = gcs_handler.list_images(prefix=prefix)
+            for source in [ s.value for s in Source]:
+                # List images from GCS
+                prefix = f"raw_data/{source}/to_process/"
+                image_files = gcs_handler.list_images(prefix=prefix)
 
-            if not image_files:
-                print(f"No images found in GCS at gs://{gcs_handler.bucket_name}/{prefix}")
-                return
+                if not image_files:
+                    print(f"No images found in GCS at gs://{gcs_handler.bucket_name}/{prefix}")
+                    return
 
-            print(f"Found {len(image_files)} images in GCS to process")
+                print(f"Found {len(image_files)} images in GCS to process")
 
-            # Process each image from GCS
-            for gcs_path in image_files:
-                # GCS lists directories as paths ending with /
-                if gcs_path.endswith('/'):
-                    continue
+                # Process each image from GCS
+                for gcs_path in image_files:
+                    # GCS lists directories as paths ending with /
+                    if gcs_path.endswith('/'):
+                        continue
 
-                # Stream download from GCS
-                image_bytes = gcs_handler.download_as_bytes(gcs_path)
-                if image_bytes is None:
-                    logging.error(f"Failed to download {gcs_path}, skipping")
-                    continue
+                    # Stream download from GCS
+                    image_bytes = gcs_handler.download_as_bytes(gcs_path)
+                    if image_bytes is None:
+                        logging.error(f"Failed to download {gcs_path}, skipping")
+                        continue
 
-                # Extract just the filename from full GCS path
-                file_name = os.path.basename(gcs_path)
+                    # Extract just the filename from full GCS path
+                    file_name = os.path.basename(gcs_path)
 
-                # Run QC on streamed image
-                try:
-                    result = multimodal_qc(image_bytes, file_name, use_gcs=True, gcs_handler=gcs_handler)
-                    if result == "skipped_empty":
-                        logging.info(f"Skipped empty image: {file_name}")
-                        # Delete the empty image from GCS
-                        gcs_handler.delete_blob(gcs_path)
-                    elif result in ["fire", "no fire"]:
-                        # Successfully processed and moved - delete original
-                        gcs_handler.delete_blob(gcs_path)
-                except Exception as e:
-                    logging.error(f"Error processing {file_name}: {str(e)}")
-                    continue
+                    # Run QC on streamed image
+                    try:
+                        result = multimodal_qc(image_bytes, file_name, use_gcs=True, gcs_handler=gcs_handler)
+                        if result == "skipped_empty":
+                            logging.info(f"Skipped empty image: {file_name}")
+                            # Delete the empty image from GCS
+                            gcs_handler.delete_blob(gcs_path)
+                        elif result in ["fire", "no fire"]:
+                            # Successfully processed and moved - delete original
+                            gcs_handler.delete_blob(gcs_path)
+                    except Exception as e:
+                        logging.error(f"Error processing {file_name}: {str(e)}")
+                        continue
 
         except Exception as e:
             logging.error(f"Failed to initialize GCS handler: {str(e)}")
             logging.info("Falling back to local processing due to GCS error")
             use_gcs = False
 
-    if not use_gcs:
-        # Standard local file processing
-        if input_path:
-            # Use provided path
-            base_path = resolve_path(f"data/{input_path}")
-        else:
-            # Default to eonet path
-            base_path = resolve_path("data/eonet_fire_events/to_process")
-        
-        image_files = glob.glob(f"{base_path}/*")
+        if not use_gcs:
+            # Standard local file processing
+            if input_path:
+                # Use provided path
+                base_path = resolve_path(f"data/{input_path}")
+            else:
+                # Default to eonet path
+                base_path = resolve_path("data/eonet_fire_events/to_process")
+            
+            image_files = glob.glob(f"{base_path}/*")
 
-        if not image_files:
-            print(f"No images found locally in {base_path}")
-            return
+            if not image_files:
+                print(f"No images found locally in {base_path}")
+                return
 
-        print(f"Found {len(image_files)} images locally to process in {base_path}")
+            print(f"Found {len(image_files)} images locally to process in {base_path}")
 
-        # Process each file from local directory
-        if GEMINI_AVAILABLE:
-            for file_path in image_files:
-                try:
-                    result = multimodal_qc(file_path)
-                    if result == "skipped_empty":
-                        logging.info(f"Skipped empty image: {file_path}")
-                except Exception as e:
-                    logging.error(f"Error processing {file_path}: {str(e)}")
-                    continue
-        else:
-            logging.error(f"Multimodal qc not available. Genai client not set")
+            # Process each file from local directory
+            if GEMINI_AVAILABLE:
+                for file_path in image_files:
+                    try:
+                        result = multimodal_qc(file_path)
+                        if result == "skipped_empty":
+                            logging.info(f"Skipped empty image: {file_path}")
+                    except Exception as e:
+                        logging.error(f"Error processing {file_path}: {str(e)}")
+                        continue
+            else:
+                logging.error(f"Multimodal qc not available. Genai client not set")
 
 
 def upload_labeled_to_gcs():
