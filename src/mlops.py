@@ -5,7 +5,8 @@ import logging
 import tempfile
 import time
 from typing import List, Optional
-
+import numpy as np
+import cv2
 
 from google import genai
 from google.cloud import storage
@@ -112,6 +113,42 @@ class GCSHandler:
             self.logger.error(f"Failed to list images with prefix {prefix}: {str(e)}")
             return []
 
+def is_image_empty(image_data):
+    """Check if an image is empty (all black pixels).
+
+    Args:
+        image_data: Either a file path (str) or bytes data.
+
+    Returns:
+        bool: True if image is empty (all black), False otherwise.
+    """
+    try:
+        if isinstance(image_data, str):
+            # Load image from file path
+            img = cv2.imread(image_data, cv2.IMREAD_UNCHANGED)
+        else:
+            # Load image from bytes
+            nparr = np.frombuffer(image_data, np.uint8)
+            img = cv2.imdecode(nparr, cv2.IMREAD_UNCHANGED)
+
+        if img is None:
+            logging.error("Failed to load image for empty check")
+            return False
+
+        # Check if all pixels are black (0)
+        # This works for grayscale, RGB, and RGBA images
+        is_empty = np.all(img == 0)
+
+        if is_empty:
+            logging.info("Image detected as empty (all black pixels)")
+
+        return is_empty
+
+    except Exception as e:
+        logging.error(f"Error checking if image is empty: {str(e)}")
+        # In case of error, assume not empty to avoid false positives
+        return False
+
 def multimodal_qc(file_input, file_name=None, use_gcs=False, gcs_handler=None):
     """Performs a multimodal quality control check on an image using Gemini.
 
@@ -139,6 +176,12 @@ def multimodal_qc(file_input, file_name=None, use_gcs=False, gcs_handler=None):
             raise ValueError("file_name must be provided when file_input is bytes")
 
     print(f"Processing file: {file_name}")
+
+    # Check if image is empty before processing
+    if is_image_empty(file_input):
+        logging.warning(f"Skipping {file_name} - image is empty (all black pixels)")
+        print(f"Skipped {file_name} - empty image detected")
+        return "skipped_empty"
 
     # Upload to Gemini API - handle both file path and bytes
     if isinstance(file_input, str):
@@ -274,7 +317,9 @@ def run_multimodal_qc(use_gcs=False, input_path=None):
 
                 # Run QC on streamed image
                 try:
-                    multimodal_qc(image_bytes, file_name, use_gcs=True, gcs_handler=gcs_handler)
+                    result = multimodal_qc(image_bytes, file_name, use_gcs=True, gcs_handler=gcs_handler)
+                    if result == "skipped_empty":
+                        logging.info(f"Skipped empty image: {file_name}")
                 except Exception as e:
                     logging.error(f"Error processing {file_name}: {str(e)}")
                     continue
@@ -305,7 +350,9 @@ def run_multimodal_qc(use_gcs=False, input_path=None):
         if GEMINI_AVAILABLE:
             for file_path in image_files:
                 try:
-                    multimodal_qc(file_path)
+                    result = multimodal_qc(file_path)
+                    if result == "skipped_empty":
+                        logging.info(f"Skipped empty image: {file_path}")
                 except Exception as e:
                     logging.error(f"Error processing {file_path}: {str(e)}")
                     continue
