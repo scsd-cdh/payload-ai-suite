@@ -256,24 +256,13 @@ def populate(X_array, y_array, path, use_nir=False, end=False, gcs_handler=None,
                 # AFTER augmentation, resize to fixed size for the model
                 rgb = cv2.resize(rgb, (224, 224), interpolation=cv2.INTER_AREA)
 
-                if use_nir:
-                    nir = cv2.cvtColor(rgb, cv2.COLOR_BGR2GRAY)
-                    # Shape (224, 224, 1)
-                    nir = np.expand_dims(nir, axis=-1)
-                    # Shape (224, 224, 4)
-                    rgb_nir = np.concatenate((rgb, nir), axis=-1)
-                    logger.debug(f"NIR processing - RGB shape: {rgb.shape}, NIR shape: {nir.shape}, Combined: {rgb_nir.shape}")
-                    rgb_nir = dyn_zscore_normalize(rgb_nir)
-                    X_array.append(rgb_nir)
-                else:
-                    try:
-                        fused_result = rgb_nir_fusion(rgb, use_enhanced_red=True)
-                    except Exception as e:
-                        logger.warning(f"{e}: issue with rgb nir fusion technique, skipping for {image_path}")
-                        fused_result = rgb
-                    # Normalization still applied after fallback
-                    rgb = dyn_zscore_normalize(fused_result)
-                    X_array.append(rgb)
+                try:
+                    processed = prepare_model_input(rgb, use_nir=use_nir)
+                except Exception as e:
+                    logger.warning(f"{e}: failed to prepare model input for {image_path}, skipping...")
+                    continue
+
+                X_array.append(processed)
 
                 if not end:
                     y_array.append(image_path[0:1])
@@ -294,26 +283,13 @@ def populate(X_array, y_array, path, use_nir=False, end=False, gcs_handler=None,
                 # AFTER augmentation, resize to fixed size for the model
                 rgb = cv2.resize(rgb, (224, 224), interpolation=cv2.INTER_AREA)
 
-                if use_nir:
-                    nir = cv2.cvtColor(rgb, cv2.COLOR_BGR2GRAY)
-                    # Shape (224, 224, 1)
-                    nir = np.expand_dims(nir, axis=-1)
-                    # Shape (224, 224, 4)
-                    rgb_nir = np.concatenate((rgb, nir), axis=-1)
-                    logger.debug(f"NIR processing - RGB shape: {rgb.shape}, NIR shape: {nir.shape}, Combined: {rgb_nir.shape}")
-                    rgb_nir = dyn_zscore_normalize(rgb_nir)
-                    X_array.append(rgb_nir)
-                else:
-                    # RGB NIR fusion algorthm still relevant if we have 4 channels
-                    # the `use_nir` flag is soely for the AI model to take in a 4 channel input tensor
-                    try:
-                        fused_result = rgb_nir_fusion(rgb, use_enhanced_red=True)
-                    except Exception as e:
-                        logger.warning(f"{e}: issue with the rgb nir fusion technique. Skipping for {image_path}")
-                        fused_result = rgb
-                    # Normalization still applied after fallback
-                    rgb = dyn_zscore_normalize(fused_result)
-                    X_array.append(rgb)
+                try:
+                    processed = prepare_model_input(rgb, use_nir=use_nir)
+                except Exception as e:
+                    logger.warning(f"{e}: failed to prepare model input for {image_path}, skipping...")
+                    continue
+
+                X_array.append(processed)
 
                 if not end:
                     y_array.append(image_path[0:1])
@@ -471,3 +447,43 @@ def rgb_nir_fusion(image_data: np.ndarray[Any, np.dtype[np.integer[Any] | np.flo
     else:
         logger.info("No fusion method specified, returning RGB channels only")
         return rgb
+
+
+def prepare_model_input(image: np.ndarray, use_nir: bool) -> np.ndarray:
+    """Normalize channel layout for model consumption."""
+
+    if image.ndim == 2:
+        image = cv2.cvtColor(image, cv2.COLOR_GRAY2BGR)
+
+    if image.ndim != 3:
+        raise ValueError(f"Unsupported image ndim: {image.ndim}")
+
+    channels = image.shape[2]
+    if channels < 3:
+        image = cv2.cvtColor(image, cv2.COLOR_GRAY2BGR)
+        channels = 3
+
+    base_rgb = image[:, :, :3]
+
+    if use_nir:
+        if channels >= 4:
+            nir = image[:, :, 3]
+        else:
+            nir = cv2.cvtColor(base_rgb, cv2.COLOR_BGR2GRAY)
+        nir = np.expand_dims(nir, axis=-1)
+        rgb_nir = np.concatenate((base_rgb, nir), axis=-1)
+        return dyn_zscore_normalize(rgb_nir)
+
+    if channels >= 4:
+        fusion_input = image[:, :, :4]
+    else:
+        nir = cv2.cvtColor(base_rgb, cv2.COLOR_BGR2GRAY)
+        fusion_input = np.concatenate((base_rgb, np.expand_dims(nir, axis=-1)), axis=-1)
+
+    try:
+        fused = rgb_nir_fusion(fusion_input, use_enhanced_red=True)
+    except Exception as e:
+        logger.warning(f"{e}: falling back to base RGB for fusion")
+        fused = base_rgb
+
+    return dyn_zscore_normalize(fused)

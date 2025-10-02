@@ -52,3 +52,8 @@ training_checkpoints
 
 # big image
 image.NEF
+
+# HPC local docs & Windows metadata
+Speed HPC/
+*.pdf
+*:Zone.Identifier

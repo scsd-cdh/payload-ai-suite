@@ -14,7 +14,7 @@ TODO:
 
 import os
 import tensorflow as tf
-import keras
+from tensorflow import keras
 import preprocess as preprocess
 import tf2onnx
 import onnx

@@ -6,7 +6,8 @@ import requests
 import json
 import time
 import os
-from mlops import GCSHandler
+# comment out for local testing
+# from mlops import GCSHandler
 from datetime import datetime
 from paths import resolve_path, get_eonet_dir, get_data_dir, get_firms_dir
 from enum import Enum
@@ -23,6 +24,10 @@ from pyproj import Proj, Transformer
 
 from PIL import Image
 
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from mlops import GCSHandler  # for type hints only
+    
 import logging
 logger = logging.getLogger(__name__)
 
@@ -356,6 +361,7 @@ def write_image( response, metadata, source: Source, location=None, use_gcs=Fals
             # Upload to GCS
 
             try:
+                from mlops import GCSHandler
                 gcs = GCSHandler()
 
                 # Create GCS path
