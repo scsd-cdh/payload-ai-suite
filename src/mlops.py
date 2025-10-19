@@ -8,8 +8,6 @@ from typing import List, Optional
 import numpy as np
 import cv2
 
-from fetch import Source
-
 from google import genai
 from google.cloud import storage
 from paths import get_gcs_credentials_path, resolve_path
@@ -329,6 +327,8 @@ def run_multimodal_qc(use_gcs=False, input_path=None):
     if use_gcs:
         # Initialize GCS handler
         try:
+            from fetch import Source
+
             gcs_handler = GCSHandler()
             logging.info("Using GCS for multimodal QC")
 
