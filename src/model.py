@@ -27,12 +27,14 @@ import logging
 from mlops import GCSHandler
 from paths import resolve_path, get_model_path
 from mixed_res_config import DEFAULT_MIXED_RES_CONFIG
+import experiment_tracker
 
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-def train(validate=True, epochs=12, use_nir=False, use_gcs=False, 
-          use_mixed_res=False, mixed_res_config=None):
+def train(validate=True, epochs=12, use_nir=False, use_gcs=False,
+          use_mixed_res=False, mixed_res_config=None, fusion_technique='enhanced_red',
+          fusion_alpha=0.5, degrade_gsd=False):
     """
     Train CNN ResNet50 model on labeled data.
 
@@ -43,13 +45,20 @@ def train(validate=True, epochs=12, use_nir=False, use_gcs=False,
         use_gcs (bool): Whether to stream data from GCS.
         use_mixed_res (bool): Whether to apply mixed resolution operations during training.
         mixed_res_config (dict): Configuration for mixed resolution operations.
+        fusion_technique (str): RGB-NIR fusion technique ('enhanced_red', 'hsv', 'none').
+        fusion_alpha (float): Alpha parameter for enhanced_red fusion.
+        degrade_gsd (bool): Whether to degrade imagery to CubeSat GSD (~85m from 10m).
 
     Returns:
-        None
+        str: Experiment ID for this training run
     """
+    # Generate experiment ID
+    experiment_id = experiment_tracker.generate_experiment_id()
+    logger.info(f"Starting training experiment: {experiment_id}")
+
     X = []
     y = []
-    
+
     # Use default config if none provided
     if use_mixed_res and mixed_res_config is None:
         mixed_res_config = DEFAULT_MIXED_RES_CONFIG
@@ -60,13 +69,19 @@ def train(validate=True, epochs=12, use_nir=False, use_gcs=False,
             gcs = GCSHandler()
 
             # Pass GCS handler and mixed_res options to populate function
-            X, y = preprocess.populate(X, y, "labeled/yes", use_nir=use_nir, 
-                          gcs_handler=gcs, use_mixed_res=use_mixed_res, 
-                          mixed_res_config=mixed_res_config)
-            X, y = preprocess.populate(X, y, "labeled/no", use_nir=use_nir, 
-                          end=True, gcs_handler=gcs, 
+            X, y = preprocess.populate(X, y, "labeled/yes", use_nir=use_nir,
+                          gcs_handler=gcs, use_mixed_res=use_mixed_res,
+                          mixed_res_config=mixed_res_config,
+                          fusion_technique=fusion_technique,
+                          fusion_alpha=fusion_alpha,
+                          degrade_gsd=degrade_gsd)
+            X, y = preprocess.populate(X, y, "labeled/no", use_nir=use_nir,
+                          end=True, gcs_handler=gcs,
                           use_mixed_res=use_mixed_res,
-                          mixed_res_config=mixed_res_config)
+                          mixed_res_config=mixed_res_config,
+                          fusion_technique=fusion_technique,
+                          fusion_alpha=fusion_alpha,
+                          degrade_gsd=degrade_gsd)
 
         except Exception as e:
             logger.error(f"Failed to load data from GCS: {str(e)}")
@@ -74,11 +89,17 @@ def train(validate=True, epochs=12, use_nir=False, use_gcs=False,
     else:
         # Use local files with mixed resolution options
         X, y = preprocess.populate(X, y, resolve_path("data/labeled/yes"), use_nir=use_nir,
-                      use_mixed_res=use_mixed_res, 
-                      mixed_res_config=mixed_res_config)
-        X, y = preprocess.populate(X, y, resolve_path("data/labeled/no"), use_nir=use_nir, 
+                      use_mixed_res=use_mixed_res,
+                      mixed_res_config=mixed_res_config,
+                      fusion_technique=fusion_technique,
+                      fusion_alpha=fusion_alpha,
+                      degrade_gsd=degrade_gsd)
+        X, y = preprocess.populate(X, y, resolve_path("data/labeled/no"), use_nir=use_nir,
                       end=True, use_mixed_res=use_mixed_res,
-                      mixed_res_config=mixed_res_config)
+                      mixed_res_config=mixed_res_config,
+                      fusion_technique=fusion_technique,
+                      fusion_alpha=fusion_alpha,
+                      degrade_gsd=degrade_gsd)
 
     # TODO: Use numpy instead here
     X = [X[i] for i in range(min(len(X), len(y)))]
@@ -127,8 +148,11 @@ def train(validate=True, epochs=12, use_nir=False, use_gcs=False,
         top_model = bottom_model.output
         top_model = keras.layers.GlobalAveragePooling2D()(top_model)
         top_model = keras.layers.Dense(1024, activation='relu')(top_model)
+        top_model = keras.layers.Dropout(0.5)(top_model)
         top_model = keras.layers.Dense(1024, activation='relu')(top_model)
+        top_model = keras.layers.Dropout(0.5)(top_model)
         top_model = keras.layers.Dense(512, activation='relu')(top_model)
+        top_model = keras.layers.Dropout(0.3)(top_model)
         output = keras.layers.Dense(num_classes, activation='softmax')(top_model)
         return output
 
@@ -152,41 +176,98 @@ def train(validate=True, epochs=12, use_nir=False, use_gcs=False,
                                                      save_weights_only=True,
                                                      verbose=1)
 
+    early_stopping = tf.keras.callbacks.EarlyStopping(monitor='val_loss', patience=3)
+
     history = model.fit(X_train, y_train,
                         epochs=epochs,
                         validation_data=(X_test, y_test),
                         verbose=1,
                         initial_epoch=0,
                         shuffle=True,
-                        callbacks=[cp_callback])
+                        callbacks=[cp_callback, early_stopping])
 
     accuracy = history.history['accuracy']
     val_accuracy = history.history['val_accuracy']
     loss = history.history['loss']
     val_loss = history.history['val_loss']
-    export_to_onnx(model)
 
     if validate:
         test_loss, test_accuracy = model.evaluate(X_test, y_test)
         logger.info(f'Test accuracy: {test_accuracy:.4f}')
-        epochs = range(len(accuracy))
-        plt.plot(epochs, accuracy, 'r', label='Training accuracy')
-        plt.plot(epochs, val_accuracy, 'b', label='Validation accuracy')
+        epochs_range = range(len(accuracy))
+        plt.plot(epochs_range, accuracy, 'r', label='Training accuracy')
+        plt.plot(epochs_range, val_accuracy, 'b', label='Validation accuracy')
         plt.title('Training and validation accuracy')
         plt.legend(loc=0)
-        plt.figure()
-        plt.show()
 
-def export_to_onnx(model):
+        # Save experiment
+        exp_dir = experiment_tracker.create_experiment_directory(experiment_id)
+        plot_filename = os.path.join(exp_dir, "training_plot.png")
+        plt.savefig(plot_filename)
+
+        model_filename = os.path.join(exp_dir, f"model_{experiment_id}.onnx")
+        export_to_onnx(model, model_filename)
+
+        experiment_tracker.save_experiment_config(
+            experiment_id,
+            {
+                "use_nir": use_nir,
+                "dataset": {"total_samples": len(X), "train_samples": len(X_train), "test_samples": len(X_test), "source": "gcs" if use_gcs else "local"},
+                "mixed_resolution": {"enabled": use_mixed_res, **(mixed_res_config if use_mixed_res else {})},
+                "rgb_nir_fusion": {"technique": fusion_technique, "alpha": fusion_alpha},
+                "gsd_degradation": degrade_gsd,
+                "normalization": "dyn_zscore"
+            },
+            {
+                "base_model": resnet50.__class__.__name__,
+                "input_shape": list(model.input_shape[1:]),
+                "pretrained_weights": weights
+            },
+            {
+                "epochs": len(accuracy),
+                "optimizer": model.optimizer.__class__.__name__.lower(),
+                "loss": model.loss,
+                "train_test_split": len(X_test) / len(X)
+            }
+        )
+
+        experiment_tracker.save_experiment_results(
+            experiment_id,
+            {
+                "final_train_accuracy": float(accuracy[-1]),
+                "final_val_accuracy": float(val_accuracy[-1]),
+                "final_train_loss": float(loss[-1]),
+                "final_val_loss": float(val_loss[-1]),
+                "best_val_accuracy": float(max(val_accuracy)),
+                "best_val_accuracy_epoch": int(val_accuracy.index(max(val_accuracy))),
+                "test_accuracy": float(test_accuracy),
+                "test_loss": float(test_loss)
+            },
+            model_filename,
+            plot_filename
+        )
+
+        logger.info(f"Experiment {experiment_id} saved to {exp_dir}")
+
+        # plt.figure()
+        # plt.show()
+
+    return experiment_id
+
+def export_to_onnx(model, filename=None):
     """
     Export the trained model to ONNX format.
 
     Args:
         model (tf.keras.Model): The trained Keras model to be exported.
+        filename (str): Path to save the ONNX model. If None, uses default path.
 
     Returns:
         None
     """
+    if filename is None:
+        filename = get_model_path('zetane.onnx')
+
     input_signature = [
         tf.TensorSpec(
             shape=model.input_shape,
@@ -197,9 +278,9 @@ def export_to_onnx(model):
     onnx_model, _ = tf2onnx.convert.from_keras(
         model,
         input_signature=input_signature,
-        opset=13  # Specify ONNX opset version
+        opset=13
     )
-    onnx.save(onnx_model, get_model_path('zetane.onnx'))
+    onnx.save(onnx_model, filename)
 
 def run_inference(onnx_model=None, data_target=None):
     if onnx_model is None:

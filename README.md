@@ -3,7 +3,9 @@ Collection of software tools for multispectral image analysis and model testing.
 
 # Features
 - Cross-reference FIRMS fire event/EoNet and query via Copernicus's process API.
-- Run VGG model on labeled (fire/no fire) data.
+- Run ResNet50 model on labeled (fire/no fire) data.
+- Experiment tracking with automatic JSON config/results output
+- CubeSat GSD simulation (10m Sentinel-2 → 85m degradation)
 - Preprocess RGB-NIR algorithm with advanced fusion techniques
 - Optional NIR channel support for RGB-NIR 4 channel tensor model.
 - Cloud mask preprocessing to check cloud coverage threshold before wildfire inference.
@@ -128,59 +130,74 @@ uv run src/main.py [OPTIONS]
 ```
 
 ### Available Options
+
+#### Model Training
 - `--run-model`: Run the wildfire classification model.
+- `--epochs N`: Number of training epochs (default: 12)
+- `--use-nir`: Enable the 4-channel (RGB+NIR) model (Note: Not supported when using `--use-gcs`)
+- `--use-mixed-res`: Enable mixed resolution operations during training
+- `--fusion-technique {enhanced_red,hsv,none}`: RGB-NIR fusion technique (default: enhanced_red)
+- `--fusion-alpha FLOAT`: Alpha parameter for enhanced_red fusion, 0-1 (default: 0.5)
+- `--degrade-gsd`: Degrade imagery to CubeSat GSD (~85m from 10m Sentinel-2)
+- `--use-gcs`: Stream training data from Google Cloud Storage
+
+#### Data Acquisition
 - `--nasa-firms`: Fetch data availability from NASA FIRMS API.
-- `--setup-auth`: Set up OAuth2 authentication for Copernicus.
-- `--batch-download`: Download images from Flickr using Selenium.
 - `--eonet-crossref`: Fetch wildfire data from the EONET API and save it locally.
 - `--copernicus-query`: Query Sentinel-2 and Sentinel-1 data from Copernicus.
 - `--coordinates MIN_LON MIN_LAT MAX_LON MAX_LAT`: Specify a bounding box for the query.
 - `--time-range FROM TO`: Specify a time range for the query (e.g., `2023-01-01T00:00:00Z 2023-01-03T23:59:59Z`).
-- `--use-nir`: Enable the 4-channel (RGB+NIR) model (Note: Not supported when using `--use-gcs`)
-- `--use-gcs`: Stream training data from Google Cloud Storage
+- `--batch-download`: Download images from Flickr using Selenium.
+- `--process-sen2fire`: Convert Sen2Fire dataset to a state to be processed by the pipeline
+
+#### MLOps & Quality Control
 - `--multimodal-qc`: Run multimodal quality control checks using Gemini 2.0
 - `--qc-path PATH`: Path to folder for QC processing (e.g., 'sen2fire/to_qc' or 'eonet_fire_events/to_process')
 - `--cloud-mask`: Export OmniCloudMask models to ONNX and test cloud coverage assessment on labeled data
-- `--process-sen2fire`: Convert Sen2Fire dataset to a state to be processed by the pipeline
 - `--upload-labeled`: Upload labeled data to GCS after running cleanup
 - `--download-labeled`: Download labeled data from GCS to local filesystem
+
+#### Other
+- `--setup-auth`: Set up OAuth2 authentication for Copernicus.
+- `--compress-image PATH`: Test CCDS compression on .NEF image
 
 ### Examples
 1. **Run the wildfire classification model**:
    ```bash
-   uv run main.py --run-model
+   uv run src/main.py --run-model
    ```
 
-2. **Fetch wildfire data from the EONET API**:
+2. **Training with CubeSat GSD simulation**:
    ```bash
-   uv run main.py --eonet-crossref
+   uv run src/main.py --run-model --degrade-gsd
    ```
 
-3. **Query Sentinel data with a bounding box and time range**:
+3. **Training with custom epochs and mixed resolution**:
    ```bash
-   uv run main.py --copernicus-query --coordinates -59.75 -19.91 -58.72 -19.06 --time-range 2023-01-01T00:00:00Z 2023-01-03T23:59:59Z
+   uv run src/main.py --run-model --epochs 20 --use-mixed-res
    ```
 
-4. **Download images using Selenium**:
+4. **Training with HSV fusion technique**:
    ```bash
-   uv run main.py --batch-download
-   ```
-5. **Run the wildfire classification model with simulated NIR**:
-   ```bash
-   uv run main.py --run-model --use-nir
+   uv run src/main.py --run-model --fusion-technique hsv --fusion-alpha 0.6
    ```
 
-6. **Run the model using Google Cloud Storage**:
+5. **Full training with all options**:
    ```bash
-   uv run main.py --run-model --use-gcs
+   uv run src/main.py --run-model --epochs 20 --use-mixed-res --degrade-gsd --fusion-technique enhanced_red
    ```
 
-7. **Test cloud mask preprocessing on labeled data**:
+6. **Fetch wildfire data from the EONET API**:
    ```bash
-   uv run main.py --cloud-mask
+   uv run src/main.py --eonet-crossref
    ```
-# Resources
-- [Deep Learning in OpenCV](https://github.com/opencv/opencv/wiki/Deep-Learning-in-OpenCV)
-- [VGG Onnx How To](https://github.com/onnx/models/blob/main/validated/vision/classification/vgg/train_vgg.ipynb)
-- [ImageNet Demo](https://navigu.net/#imagenet)
-- [Satellite Deep Learning Techniques](https://github.com/satellite-image-deep-learning/techniques)
+
+7. **Query Sentinel data with a bounding box and time range**:
+   ```bash
+   uv run src/main.py --copernicus-query --coordinates -59.75 -19.91 -58.72 -19.06 --time-range 2023-01-01T00:00:00Z 2023-01-03T23:59:59Z
+   ```
+
+8. **Test cloud mask preprocessing on labeled data**:
+   ```bash
+   uv run src/main.py --cloud-mask
+   ```

@@ -17,6 +17,29 @@ from mixed_res_config import DEFAULT_MIXED_RES_CONFIG
 # Set up logging
 logger = logging.getLogger(__name__)
 
+def degrade_to_cubesat_gsd(image: np.ndarray) -> np.ndarray:
+    """
+    Degrade Sentinel-2 imagery (10m GSD) to match CubeSat expected GSD (~85m).
+    This simulates the lower resolution data that will be captured on-orbit.
+
+    Degradation factor: 10m -> 85m = 8.5x downsampling
+
+    Args:
+        image: Input image at Sentinel-2 resolution (HxWxC)
+
+    Returns:
+        Degraded image at CubeSat GSD, upsampled back to original dimensions
+    """
+    h, w = image.shape[:2]
+
+    # Downsample by 8.5x using INTER_AREA (best for downsampling)
+    degraded = cv2.resize(image, (w//8, h//8), interpolation=cv2.INTER_AREA)
+
+    # Upsample back to original size using INTER_LINEAR (simulates lower quality data)
+    degraded = cv2.resize(degraded, (w, h), interpolation=cv2.INTER_LINEAR)
+
+    return degraded
+
 def random_resize_with_pad(image: np.ndarray, min_scale: float = 0.5, max_scale: float = 1.5) -> np.ndarray:
     """
     Randomly resize an image, then pad to maintain original dimensions.
@@ -215,7 +238,8 @@ class FusionOutput(BaseModel):
         return v
 
 def populate(X_array, y_array, path, use_nir=False, end=False, gcs_handler=None,
-             use_mixed_res=False, mixed_res_config=None):
+             use_mixed_res=False, mixed_res_config=None, fusion_technique='enhanced_red',
+             fusion_alpha=0.5, degrade_gsd=False):
     """Populates the input arrays with preprocessed images and labels.
 
     Args:
@@ -227,6 +251,9 @@ def populate(X_array, y_array, path, use_nir=False, end=False, gcs_handler=None,
         gcs_handler: Handler for Google Cloud Storage.
         use_mixed_res (bool): Whether to apply mixed resolution operations.
         mixed_res_config (dict): Configuration for mixed resolution operations.
+        fusion_technique (str): RGB-NIR fusion technique: 'enhanced_red', 'hsv', or 'none'.
+        fusion_alpha (float): Alpha value for enhanced_red fusion (default 0.5).
+        degrade_gsd (bool): Whether to degrade imagery to CubeSat GSD (~85m from 10m).
 
     Returns:
         tuple: A tuple containing the updated X_array and y_array.
@@ -249,6 +276,10 @@ def populate(X_array, y_array, path, use_nir=False, end=False, gcs_handler=None,
                     logger.warning(f"Could not decode {image_path}, skipping...")
                     continue
 
+                # Apply GSD degradation if requested (simulates CubeSat resolution)
+                if degrade_gsd:
+                    rgb = degrade_to_cubesat_gsd(rgb)
+
                 # IMPORTANT: Apply mixed resolution operations BEFORE resizing to fixed size
                 if use_mixed_res:
                     rgb = apply_mixed_resolution_ops([rgb], **mixed_res_config)[0]
@@ -267,7 +298,11 @@ def populate(X_array, y_array, path, use_nir=False, end=False, gcs_handler=None,
                     X_array.append(rgb_nir)
                 else:
                     try:
-                        fused_result = rgb_nir_fusion(rgb, use_enhanced_red=True)
+                        fused_result = rgb_nir_fusion(
+                            rgb,
+                            technique=fusion_technique,
+                            alpha=fusion_alpha
+                        )
                     except Exception as e:
                         logger.warning(f"{e}: issue with rgb nir fusion technique, skipping for {image_path}")
                         fused_result = rgb
@@ -286,6 +321,10 @@ def populate(X_array, y_array, path, use_nir=False, end=False, gcs_handler=None,
                 if rgb is None:
                     logger.warning(f"Could not read {image_path}, skipping...")
                     continue
+
+                # Apply GSD degradation if requested (simulates CubeSat resolution)
+                if degrade_gsd:
+                    rgb = degrade_to_cubesat_gsd(rgb)
 
                 # IMPORTANT: Apply mixed resolution operations BEFORE resizing to fixed size
                 if use_mixed_res:
@@ -307,7 +346,11 @@ def populate(X_array, y_array, path, use_nir=False, end=False, gcs_handler=None,
                     # RGB NIR fusion algorthm still relevant if we have 4 channels
                     # the `use_nir` flag is soely for the AI model to take in a 4 channel input tensor
                     try:
-                        fused_result = rgb_nir_fusion(rgb, use_enhanced_red=True)
+                        fused_result = rgb_nir_fusion(
+                            rgb,
+                            technique=fusion_technique,
+                            alpha=fusion_alpha
+                        )
                     except Exception as e:
                         logger.warning(f"{e}: issue with the rgb nir fusion technique. Skipping for {image_path}")
                         fused_result = rgb
@@ -403,20 +446,26 @@ def dyn_zscore_normalize(img: np.ndarray, no_data_value: float = 0.0) -> np.ndar
 
 
 def rgb_nir_fusion(image_data: np.ndarray[Any, np.dtype[np.integer[Any] | np.floating[Any]]],
-                   use_enhanced_red: bool = False, use_hsv_fusion: bool = False):
+                   technique: str = 'enhanced_red', alpha: float = 0.5):
     """
     Use nir band to "enhance" RGB image. Data fusion technique borrowed from robotics computer vision
 
-    Two flag options:
+    Args:
+        image_data: 4-channel input (RGB+NIR)
+        technique: Fusion method - 'enhanced_red', 'hsv', or 'none'
+        alpha: Blending factor for enhanced_red technique (default 0.5)
 
-    1. enhanced red
-    alpha = 0.5
-    enhanced_red = (1 - alpha) * red + alpha * nir
-    fused = np.stack([enhanced_red, green, blue], axis=-1)
+    Available techniques:
 
-    2. We can try convert the image to a diferent colorspace (RGB -> HSV)
-    and then we combine the brightness channel (V) with the NIR image.
-    We fuse it back together using the inverse of RGB -> HSV matrix. Hue and saturation remain untouched.
+    1. 'enhanced_red': Blend NIR with red channel
+       enhanced_red = (1 - alpha) * red + alpha * nir
+       fused = np.stack([enhanced_red, green, blue], axis=-1)
+
+    2. 'hsv': HSV colorspace fusion
+       Convert RGB -> HSV, combine V channel with NIR, convert back to RGB.
+       Hue and saturation remain untouched.
+
+    3. 'none': Return RGB channels only (no fusion)
     """
     logger.info(f"RGB-NIR fusion called with shape: {image_data.shape}")
 
@@ -432,10 +481,9 @@ def rgb_nir_fusion(image_data: np.ndarray[Any, np.dtype[np.integer[Any] | np.flo
     rgb = image_data[:, :, :3]
     nir = image_data[:, :, 3]
 
-    if use_enhanced_red:
-        logger.info("Using enhanced red fusion method")
+    if technique == 'enhanced_red':
+        logger.info(f"Using enhanced red fusion method with alpha={alpha}")
         blue, green, red = cv2.split(rgb)
-        alpha = 0.5
         enhanced_red = (1 - alpha) * red + alpha * nir
         fused = np.stack([blue, green, enhanced_red], axis=-1)
         logger.debug(f"Enhanced red fusion complete - output shape: {fused.shape}")
@@ -449,7 +497,7 @@ def rgb_nir_fusion(image_data: np.ndarray[Any, np.dtype[np.integer[Any] | np.flo
 
         return fused
 
-    elif use_hsv_fusion:
+    elif technique == 'hsv':
         logger.info("Using HSV fusion method")
         hsv = cv2.cvtColor(rgb, cv2.COLOR_BGR2HSV)
         h, s, v = cv2.split(hsv)
@@ -468,6 +516,10 @@ def rgb_nir_fusion(image_data: np.ndarray[Any, np.dtype[np.integer[Any] | np.flo
 
         return fused
 
+    elif technique == 'none':
+        logger.info("No fusion - returning RGB channels only")
+        return rgb
+
     else:
-        logger.info("No fusion method specified, returning RGB channels only")
+        logger.warning(f"Unknown fusion technique '{technique}', returning RGB only")
         return rgb
