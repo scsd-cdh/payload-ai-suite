@@ -124,44 +124,7 @@ def train(validate=True, epochs=12, use_nir=False, use_gcs=False,
     logger.info(f"y_train Shape: {y_train.shape}")
     logger.info(f"y_test Shape: {y_test.shape}")
 
-    input_channels = 4 if use_nir else 3
-    input_shape = (224, 224, input_channels)
-
-    weights = 'imagenet' if input_channels == 3 else None
-
-    resnet50 = tf.keras.applications.resnet.ResNet50(
-        weights=weights,
-        include_top=False,
-        input_shape=input_shape
-    )
-    #since ResNet50 is pre-trained w/ 3-channel RGB images, this if-else ensure it runs on a 4-channel system
-
-    # Here we freeze the last 4 layers
-    # Layers are set to trainable as True by default
-    for layer in resnet50.layers:
-        layer.trainable = False
-
-    for (i, layer) in enumerate(resnet50.layers):
-        logger.info(f"{i} {layer.__class__.__name__} {layer.trainable}")
-
-    def create_top(bottom_model, num_classes):
-        top_model = bottom_model.output
-        top_model = keras.layers.GlobalAveragePooling2D()(top_model)
-        top_model = keras.layers.Dense(1024, activation='relu')(top_model)
-        top_model = keras.layers.Dropout(0.5)(top_model)
-        top_model = keras.layers.Dense(1024, activation='relu')(top_model)
-        top_model = keras.layers.Dropout(0.5)(top_model)
-        top_model = keras.layers.Dense(512, activation='relu')(top_model)
-        top_model = keras.layers.Dropout(0.3)(top_model)
-        output = keras.layers.Dense(num_classes, activation='softmax')(top_model)
-        return output
-
-    num_classes = 2
-    head = create_top(resnet50, num_classes)
-    model = keras.models.Model(inputs=resnet50.input, outputs=head)
-
-    model.summary(print_fn=logger.info)
-    model.compile(optimizer='adam', loss='categorical_crossentropy', metrics=['accuracy'])
+    model = build_model(use_nir=use_nir)
 
     checkpoint_path = "training_checkpoints/cp.weights.h5"
     checkpoint_dir = os.path.dirname(checkpoint_path)
@@ -253,6 +216,48 @@ def train(validate=True, epochs=12, use_nir=False, use_gcs=False,
         # plt.show()
 
     return experiment_id
+
+def build_model(use_nir: bool):
+    input_channels = 4 if use_nir else 3
+    input_shape = (224, 224, input_channels)
+
+    weights = 'imagenet' if input_channels == 3 else None
+
+    resnet50 = tf.keras.applications.resnet.ResNet50(
+        weights=weights,
+        include_top=False,
+        input_shape=input_shape
+    )
+    #since ResNet50 is pre-trained w/ 3-channel RGB images, this if-else ensure it runs on a 4-channel system
+
+    # Here we freeze the last 4 layers
+    # Layers are set to trainable as True by default
+    for layer in resnet50.layers:
+        layer.trainable = False
+
+    for (i, layer) in enumerate(resnet50.layers):
+        logger.info(f"{i} {layer.__class__.__name__} {layer.trainable}")
+
+    def create_top(bottom_model, num_classes):
+        top_model = bottom_model.output
+        top_model = keras.layers.GlobalAveragePooling2D()(top_model)
+        top_model = keras.layers.Dense(1024, activation='relu')(top_model)
+        top_model = keras.layers.Dropout(0.5)(top_model)
+        top_model = keras.layers.Dense(1024, activation='relu')(top_model)
+        top_model = keras.layers.Dropout(0.5)(top_model)
+        top_model = keras.layers.Dense(512, activation='relu')(top_model)
+        top_model = keras.layers.Dropout(0.3)(top_model)
+        output = keras.layers.Dense(num_classes, activation='softmax')(top_model)
+        return output
+
+    num_classes = 2
+    head = create_top(resnet50, num_classes)
+    model = keras.models.Model(inputs=resnet50.input, outputs=head)
+
+    model.summary(print_fn=logger.info)
+    model.compile(optimizer='adam', loss='categorical_crossentropy', metrics=['accuracy'])
+    
+    return model
 
 def export_to_onnx(model, filename=None):
     """
