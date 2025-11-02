@@ -266,7 +266,8 @@ def populate(X_array, y_array, path, use_nir=False, end=False, gcs_handler=None,
         if gcs_handler:
             # Stream from GCS
             image_paths = gcs_handler.list_images(prefix=path)
-            for image_path in image_paths:
+            for i,image_path in enumerate(image_paths):
+                print(f"Processing image {i+1}/{len(image_paths)}: {image_path}")
                 image_bytes = gcs_handler.download_as_bytes(image_path)
                 if image_bytes is None:
                     logger.warning(f"Could not read {image_path}, skipping...")
