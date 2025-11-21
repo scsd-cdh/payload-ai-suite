@@ -132,7 +132,7 @@ def train(validate=True, epochs=12, use_nir=False, use_gcs=False,
             X_train, y_train, X_test, y_test,
             use_nir=use_nir,
             epochs_per_trial=10,  # Quick search
-            max_trials=15
+            max_trials=60
         )
         
         # build the final model using the best hps
@@ -167,6 +167,7 @@ def train(validate=True, epochs=12, use_nir=False, use_gcs=False,
                         initial_epoch=0,
                         shuffle=True,
                         callbacks=[cp_callback, early_stopping],
+                        batch_size=2
                         )
 
     accuracy = history.history['accuracy']
@@ -343,25 +344,29 @@ def tune_hyperparameters(X_train, y_train, X_val, y_val, use_nir: bool,
     # We use a lambda to pass the `use_nir` argument to our model builder
     model_builder = lambda hp: build_hypermodel(hp, use_nir=use_nir)[0] 
 
-    tuner = kt.RandomSearch(
+    # --- This is the only line that changed ---
+    tuner = kt.BayesianOptimization(
         model_builder,
         objective='val_accuracy',
         max_trials=max_trials,
         executions_per_trial=1,  # Train each model once
         directory='hyperparam_tuning',
-        project_name='resnet50_classification'
+        project_name='resnet50_classification_bayesian', # Changed project name to avoid conflicts
+        overwrite=True
     )
+    # -------------------------------------------
 
     # Add an EarlyStopping callback to speed up the search
     stop_early = tf.keras.callbacks.EarlyStopping(monitor='val_loss', patience=3)
 
-    logger.info(f"Starting hyperparameter tuning... (max_trials={max_trials}, epochs_per_trial={epochs_per_trial})")
+    logger.info(f"Starting Bayesian Optimization tuning... (max_trials={max_trials}, epochs_per_trial={epochs_per_trial})")
     
     tuner.search(
         X_train, y_train,
         epochs=epochs_per_trial,
         validation_data=(X_val, y_val),
         callbacks=[stop_early],
+        batch_size=2
     )
 
     # Get the optimal hyperparameters
