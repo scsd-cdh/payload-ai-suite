@@ -4,9 +4,19 @@ import glob
 import logging
 import tempfile
 import time
-from typing import List, Optional
+import json
+from typing import List, Optional, Dict, Any
 import numpy as np
 import cv2
+import matplotlib.pyplot as plt
+from sklearn.metrics import (
+    confusion_matrix,
+    classification_report,
+    roc_curve,
+    roc_auc_score,
+    precision_recall_curve,
+    average_precision_score
+)
 
 from google import genai
 from google.cloud import storage
@@ -152,6 +162,292 @@ class GCSHandler:
         except Exception as e:
             self.logger.error(f"Failed to delete {gcs_path}: {str(e)}")
             return False
+
+class ModelEvaluator:
+    """Handles comprehensive model evaluation and metrics generation for experiments."""
+
+    def __init__(self, experiment_id: str, experiment_dir: str):
+        """Initialize evaluator with experiment context.
+
+        Args:
+            experiment_id: Unique experiment identifier
+            experiment_dir: Path to experiment output directory
+        """
+        self.experiment_id = experiment_id
+        self.experiment_dir = experiment_dir
+        self.logger = logging.getLogger(__name__)
+
+    def generate_confusion_matrix(self, y_true: np.ndarray, y_pred: np.ndarray) -> Dict[str, Any]:
+        """Generate and save confusion matrix visualization.
+
+        Args:
+            y_true: True labels
+            y_pred: Predicted labels
+
+        Returns:
+            dict: Confusion matrix values and file path
+        """
+        if len(y_true.shape) > 1 and y_true.shape[1] > 1:
+            y_true_classes = np.argmax(y_true, axis=1)
+        else:
+            y_true_classes = y_true
+
+        if len(y_pred.shape) > 1 and y_pred.shape[1] > 1:
+            y_pred_classes = np.argmax(y_pred, axis=1)
+        else:
+            y_pred_classes = y_pred
+
+        confusion_matrix_array = confusion_matrix(y_true_classes, y_pred_classes)
+
+        true_negative, false_positive, false_negative, true_positive = confusion_matrix_array.ravel()
+
+        figure, image_axis = plt.subplots(figsize=(8, 6))
+        image = image_axis.imshow(confusion_matrix_array, interpolation='nearest', cmap=plt.cm.Blues)
+        image_axis.figure.colorbar(image, ax=image_axis)
+
+        classes = ['No Fire', 'Fire']
+        image_axis.set(xticks=np.arange(confusion_matrix_array.shape[1]),
+               yticks=np.arange(confusion_matrix_array.shape[0]),
+               xticklabels=classes,
+               yticklabels=classes,
+               ylabel='True Label',
+               xlabel='Predicted Label',
+               title='Confusion Matrix')
+
+        threshold = confusion_matrix_array.max() / 2.
+        for i in range(confusion_matrix_array.shape[0]):
+            for j in range(confusion_matrix_array.shape[1]):
+                image_axis.text(j, i, format(confusion_matrix_array[i, j], 'd'),
+                       ha="center", va="center",
+                       color="white" if confusion_matrix_array[i, j] > threshold else "black",
+                       fontsize=16)
+
+        figure.tight_layout()
+
+        save_path = os.path.join(self.experiment_dir, "confusion_matrix.png")
+        plt.savefig(save_path, dpi=150, bbox_inches='tight')
+        plt.close()
+
+        self.logger.info(f"Confusion matrix saved to {save_path}")
+
+        return {
+            "TP": int(true_positive),
+            "FP": int(false_positive),
+            "TN": int(true_negative),
+            "FN": int(false_negative),
+            "image_path": save_path
+        }
+
+    def calculate_classification_metrics(self, y_true: np.ndarray, y_pred: np.ndarray) -> Dict[str, Any]:
+        """Calculate and save sklearn classification report.
+
+        Args:
+            y_true: True labels
+            y_pred: Predicted labels
+
+        Returns:
+            dict: Report file path and parsed metrics
+        """
+        if len(y_true.shape) > 1 and y_true.shape[1] > 1:
+            y_true_classes = np.argmax(y_true, axis=1)
+        else:
+            y_true_classes = y_true
+
+        if len(y_pred.shape) > 1 and y_pred.shape[1] > 1:
+            y_pred_classes = np.argmax(y_pred, axis=1)
+        else:
+            y_pred_classes = y_pred
+
+        target_names = ['no_fire', 'fire']
+        report_dict = classification_report(y_true_classes, y_pred_classes,
+                                      target_names=target_names,
+                                      output_dict=True)
+
+        report_string = classification_report(y_true_classes, y_pred_classes,
+                                           target_names=target_names)
+
+        report_path = os.path.join(self.experiment_dir, "classification_report.txt")
+        with open(report_path, 'w') as file_handle:
+            file_handle.write("CLASSIFICATION REPORT\n")
+            file_handle.write("="*60 + "\n")
+            file_handle.write(report_string)
+            file_handle.write("\n" + "="*60 + "\n")
+            file_handle.write(f"Fire Class Recall: {report_dict['fire']['recall']:.4f} (Primary optimization metric)\n")
+
+        self.logger.info(f"Classification report saved to {report_path}")
+
+        return {
+            "fire_class": {
+                "precision": float(report_dict['fire']['precision']),
+                "recall": float(report_dict['fire']['recall']),
+                "f1_score": float(report_dict['fire']['f1-score']),
+                "support": int(report_dict['fire']['support'])
+            },
+            "no_fire_class": {
+                "precision": float(report_dict['no_fire']['precision']),
+                "recall": float(report_dict['no_fire']['recall']),
+                "f1_score": float(report_dict['no_fire']['f1-score']),
+                "support": int(report_dict['no_fire']['support'])
+            },
+            "report_path": report_path
+        }
+
+    def generate_precision_recall_curve(self, y_true: np.ndarray, y_pred_proba: np.ndarray) -> Dict[str, Any]:
+        """Generate Precision-Recall curve.
+
+        Args:
+            y_true: True labels
+            y_pred_proba: Prediction probabilities
+
+        Returns:
+            dict: Average precision score and curve image path
+        """
+        if len(y_true.shape) > 1 and y_true.shape[1] > 1:
+            y_true_classes = np.argmax(y_true, axis=1)
+        else:
+            y_true_classes = y_true
+
+        if len(y_pred_proba.shape) > 1 and y_pred_proba.shape[1] > 1:
+            y_scores = y_pred_proba[:, 1]
+        else:
+            y_scores = y_pred_proba
+
+        precision, recall, pr_thresholds = precision_recall_curve(y_true_classes, y_scores)
+        average_precision = average_precision_score(y_true_classes, y_scores)
+
+        figure, curve_axis = plt.subplots(figsize=(8, 6))
+
+        curve_axis.plot(recall, precision, color='darkgreen', lw=2,
+                label=f'PR curve (AP = {average_precision:.3f})')
+        curve_axis.set_xlim([0.0, 1.0])
+        curve_axis.set_ylim([0.0, 1.05])
+        curve_axis.set_xlabel('Recall')
+        curve_axis.set_ylabel('Precision')
+        curve_axis.set_title('Precision-Recall Curve')
+        curve_axis.legend(loc="lower left")
+        curve_axis.grid(True, alpha=0.3)
+
+        figure.tight_layout()
+
+        save_path = os.path.join(self.experiment_dir, "precision_recall_curve.png")
+        plt.savefig(save_path, dpi=150, bbox_inches='tight')
+        plt.close()
+
+        self.logger.info(f"Precision-Recall curve saved to {save_path}")
+
+        return {
+            "average_precision": float(average_precision),
+            "curve_path": save_path
+        }
+
+    def save_misclassified_samples(self, X_test: np.ndarray, y_true: np.ndarray,
+                                   y_pred: np.ndarray, limit: int = 30) -> Dict[str, Any]:
+        """Record misclassified sample indices.
+
+        Args:
+            X_test: Test images
+            y_true: True labels
+            y_pred: Predicted labels
+            limit: Maximum number of samples to record
+
+        Returns:
+            dict: Summary of misclassified samples
+        """
+        if len(y_true.shape) > 1 and y_true.shape[1] > 1:
+            y_true_classes = np.argmax(y_true, axis=1)
+        else:
+            y_true_classes = y_true
+
+        if len(y_pred.shape) > 1 and y_pred.shape[1] > 1:
+            y_pred_classes = np.argmax(y_pred, axis=1)
+        else:
+            y_pred_classes = y_pred
+
+        misclassified_mask = y_true_classes != y_pred_classes
+
+        false_positive_indices = np.where((y_true_classes == 0) & (y_pred_classes == 1))[0]
+        false_negative_indices = np.where((y_true_classes == 1) & (y_pred_classes == 0))[0]
+
+        false_positive_indices = false_positive_indices[:limit // 2]
+        false_negative_indices = false_negative_indices[:limit // 2]
+
+        misclassified_dir = os.path.join(self.experiment_dir, "misclassified")
+        os.makedirs(misclassified_dir, exist_ok=True)
+
+        false_positive_samples = [{"index": int(index)} for index in false_positive_indices]
+        false_negative_samples = [{"index": int(index)} for index in false_negative_indices]
+
+        summary = {
+            "total_misclassified": int(np.sum(misclassified_mask)),
+            "false_positives": {
+                "count": len(false_positive_indices),
+                "indices": false_positive_samples
+            },
+            "false_negatives": {
+                "count": len(false_negative_indices),
+                "indices": false_negative_samples
+            }
+        }
+
+        summary_path = os.path.join(misclassified_dir, "summary.json")
+        with open(summary_path, 'w') as file_handle:
+            json.dump(summary, file_handle, indent=2)
+
+        self.logger.info(f"Misclassified sample indices saved to {summary_path}")
+
+        return {
+            "misclassified_dir": misclassified_dir,
+            "summary": summary,
+            "summary_path": summary_path
+        }
+
+    def evaluate_and_save_all(self, X_test: np.ndarray, y_test: np.ndarray,
+                             model) -> Dict[str, Any]:
+        """Main orchestrator: run all evaluation methods and aggregate results.
+
+        Args:
+            X_test: Test images
+            y_test: Test labels
+            model: Trained Keras model
+
+        Returns:
+            dict: Aggregated evaluation metrics and file paths
+        """
+        self.logger.info(f"Starting evaluation for {self.experiment_id}")
+
+        y_pred_proba = model.predict(X_test)
+
+        confusion_matrix_results = self.generate_confusion_matrix(y_test, y_pred_proba)
+        classification_results = self.calculate_classification_metrics(y_test, y_pred_proba)
+        precision_recall_results = self.generate_precision_recall_curve(y_test, y_pred_proba)
+        misclassified_results = self.save_misclassified_samples(X_test, y_test, y_pred_proba)
+
+        evaluation_metrics = {
+            "confusion_matrix": {
+                "TP": confusion_matrix_results["TP"],
+                "FP": confusion_matrix_results["FP"],
+                "TN": confusion_matrix_results["TN"],
+                "FN": confusion_matrix_results["FN"]
+            },
+            "metrics": {
+                "fire_class": classification_results["fire_class"],
+                "no_fire_class": classification_results["no_fire_class"]
+            },
+            "average_precision": precision_recall_results["average_precision"],
+            "output_files": {
+                "confusion_matrix_image": confusion_matrix_results["image_path"],
+                "classification_report": classification_results["report_path"],
+                "precision_recall_curve": precision_recall_results["curve_path"],
+                "misclassified_samples_dir": misclassified_results["misclassified_dir"],
+                "misclassified_summary": misclassified_results["summary_path"]
+            },
+            "misclassified_summary": misclassified_results["summary"]
+        }
+
+        self.logger.info(f"Evaluation complete for {self.experiment_id}")
+
+        return evaluation_metrics
+
 
 def is_image_empty(image_data):
     """Check if an image is empty (all black pixels).

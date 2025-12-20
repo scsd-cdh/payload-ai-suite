@@ -72,7 +72,8 @@ def save_experiment_results(
     experiment_id: str,
     results: Dict[str, Any],
     model_filename: str,
-    plot_filename: str
+    plot_filename: str,
+    evaluation_metrics: Dict[str, Any]
 ) -> str:
     """Save experiment results and output file paths.
 
@@ -81,6 +82,7 @@ def save_experiment_results(
         results: Training results (accuracy, loss metrics)
         model_filename: Path to saved ONNX model
         plot_filename: Path to saved training plot
+        evaluation_metrics: Evaluation metrics from ModelEvaluator
 
     Returns:
         str: Path to saved results file
@@ -93,7 +95,8 @@ def save_experiment_results(
         "outputs": {
             "model_file": model_filename,
             "plot_file": plot_filename
-        }
+        },
+        "evaluation": evaluation_metrics
     }
 
     results_path = os.path.join(exp_dir, "results.json")
