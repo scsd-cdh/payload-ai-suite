@@ -439,6 +439,8 @@ def dyn_zscore_normalize(img: np.ndarray, no_data_value: float = 0.0) -> np.ndar
         diff_sq = (channel - mean) ** 2 * channel_mask
         std = np.sqrt(diff_sq.sum() / valid_count + epsilon)
 
+        logger.debug(f"Channel {c} normalization - mean: {mean:.2f}, std: {std:.2f}, valid pixels: {valid_count}")
+
         # Apply normalization only to valid pixels
         normal_img[:, :, c] = np.where(channel_mask, (channel - mean) / std, 0.0)
 
@@ -484,7 +486,7 @@ def rgb_nir_fusion(image_data: np.ndarray[Any, np.dtype[np.integer[Any] | np.flo
     if technique == 'enhanced_red':
         logger.info(f"Using enhanced red fusion method with alpha={alpha}")
         blue, green, red = cv2.split(rgb)
-        enhanced_red = (1 - alpha) * red + alpha * nir
+        enhanced_red = ((1 - alpha) * red + alpha * nir).astype(np.uint8)
         fused = np.stack([blue, green, enhanced_red], axis=-1)
         logger.debug(f"Enhanced red fusion complete - output shape: {fused.shape}")
 
@@ -502,7 +504,8 @@ def rgb_nir_fusion(image_data: np.ndarray[Any, np.dtype[np.integer[Any] | np.flo
         hsv = cv2.cvtColor(rgb, cv2.COLOR_BGR2HSV)
         h, s, v = cv2.split(hsv)
         # Combine V channel with NIR
-        enhanced_v = (v + nir) / 2
+        enhanced_v = ((v + nir) / 2).astype(np.uint8)
+        logger.warning(f"HSV merge inputs - h: {h.dtype}/{h.shape}, s: {s.dtype}/{s.shape}, enhanced_v: {enhanced_v.dtype}/{enhanced_v.shape}")
         fused_hsv = cv2.merge([h, s, enhanced_v])
         fused = cv2.cvtColor(fused_hsv, cv2.COLOR_HSV2BGR)
         logger.debug(f"HSV fusion complete - output shape: {fused.shape}")
