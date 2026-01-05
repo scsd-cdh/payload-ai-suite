@@ -21,6 +21,7 @@ venv/
 # Data files
 data/
 events/
+hyperparam_tuning/
 
 # OS-specific files
 .DS_Store
@@ -52,3 +53,4 @@ training_checkpoints
 
 # big image
 image.NEF
+
