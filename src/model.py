@@ -25,7 +25,8 @@ from sklearn.model_selection import train_test_split
 from sklearn.utils.class_weight import compute_class_weight
 import matplotlib.pyplot as plt
 import logging
-from mlops import GCSHandler, ModelEvaluator
+from mlops import GCSHandler
+from metrics import ModelEvaluator
 from paths import resolve_path, get_model_path
 from mixed_res_config import DEFAULT_MIXED_RES_CONFIG
 import experiment_tracker
@@ -33,7 +34,7 @@ import experiment_tracker
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-def train(validate=True, epochs=12, use_nir=False, use_gcs=False,
+def train(validate=True, epochs=50, use_nir=False, use_gcs=False,
           use_mixed_res=False, mixed_res_config=None, fusion_technique='enhanced_red',
           fusion_alpha=0.5, degrade_gsd=False):
     """
@@ -110,28 +111,24 @@ def train(validate=True, epochs=12, use_nir=False, use_gcs=False,
 
     label_encoder = preprocessing.LabelEncoder()
     y_train = label_encoder.fit_transform(y_train)
+    # Should this be just fit instead of fit_transform?
     y_test = label_encoder.fit_transform(y_test)
 
-    y_train = tf.keras.utils.to_categorical(y_train, num_classes=2)
-    y_test = tf.keras.utils.to_categorical(y_test, num_classes=2)
+    # Compute balanced class weights
+    class_weights_array = compute_class_weight(
+        class_weight='balanced',
+        classes=np.unique(y_train),
+        y=y_train
+    )
 
     y_train = np.array(y_train)
     X_train = np.array(X_train)
     y_test = np.array(y_test)
     X_test = np.array(X_test)
 
-    logger.info(f"Shape of an image in X_train: {X_train.shape}")
-    logger.info(f"Shape of an image in X_test: {X_test.shape}")
-    logger.info(f"y_train Shape: {y_train.shape}")
-    logger.info(f"y_test Shape: {y_test.shape}")
+    y_train = tf.keras.utils.to_categorical(y_train, num_classes=2)
+    y_test = tf.keras.utils.to_categorical(y_test, num_classes=2)
 
-    # Compute balanced class weights
-    y_train_classes = np.argmax(y_train, axis=1)
-    class_weights_array = compute_class_weight(
-        class_weight='balanced',
-        classes=np.unique(y_train_classes),
-        y=y_train_classes
-    )
     class_weights = {i: weight for i, weight in enumerate(class_weights_array)}
     logger.info(f"Computed class weights: {class_weights}")
 
@@ -145,7 +142,6 @@ def train(validate=True, epochs=12, use_nir=False, use_gcs=False,
         include_top=False,
         input_shape=input_shape
     )
-    #since ResNet50 is pre-trained w/ 3-channel RGB images, this if-else ensure it runs on a 4-channel system
 
     # Here we freeze the last 4 layers
     # Layers are set to trainable as True by default
@@ -190,7 +186,7 @@ def train(validate=True, epochs=12, use_nir=False, use_gcs=False,
     early_stopping = tf.keras.callbacks.EarlyStopping(monitor='val_loss', patience=3)
 
     history = model.fit(X_train, y_train,
-                        epochs=epochs,
+                        epochs=50,
                         validation_data=(X_test, y_test),
                         verbose=1,
                         initial_epoch=0,
@@ -215,12 +211,14 @@ def train(validate=True, epochs=12, use_nir=False, use_gcs=False,
         exp_dir = experiment_tracker.create_experiment_directory(experiment_id)
         plot_filename = os.path.join(exp_dir, "training_plot.png")
         plt.savefig(plot_filename)
-        plt.close()
+        # plt.close()
 
         model_filename = os.path.join(exp_dir, f"model_{experiment_id}.onnx")
         export_to_onnx(model, model_filename)
 
         evaluator = ModelEvaluator(experiment_id, exp_dir)
+
+
         evaluation_metrics = evaluator.evaluate_and_save_all(X_test, y_test, model)
 
         experiment_tracker.save_experiment_config(

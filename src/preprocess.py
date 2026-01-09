@@ -42,7 +42,7 @@ def degrade_to_cubesat_gsd(image: np.ndarray) -> np.ndarray:
 
 def random_resize_with_pad(image: np.ndarray, min_scale: float = 0.5, max_scale: float = 1.5) -> np.ndarray:
     """
-    Randomly resize an image, then pad to maintain original dimensions.
+    Randomly resize an image without cropping.
     This simulates images of different resolutions during training.
 
     Args:
@@ -51,7 +51,7 @@ def random_resize_with_pad(image: np.ndarray, min_scale: float = 0.5, max_scale:
         max_scale: Maximum scaling factor
 
     Returns:
-        Resized and padded image with same shape as input
+        Resized image (dimensions may vary from input, no cropping applied)
     """
     h, w = image.shape[:2]
 
@@ -60,37 +60,16 @@ def random_resize_with_pad(image: np.ndarray, min_scale: float = 0.5, max_scale:
     new_h = int(h * scale)
     new_w = int(w * scale)
 
-    # Resize image
+    # Resize image - no padding or cropping
     resized = cv2.resize(image, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
 
-    # Pad to original size
-    if scale < 1.0:
-        # Image was shrunk, need to pad
-        pad_h = h - new_h
-        pad_w = w - new_w
-
-        # Calculate padding for each side
-        top = pad_h // 2
-        bottom = pad_h - top
-        left = pad_w // 2
-        right = pad_w - left
-
-        # Pad with zeros (black)
-        padded = cv2.copyMakeBorder(resized, top, bottom, left, right,
-                                   cv2.BORDER_CONSTANT, value=0)
-    else:
-        # Image was enlarged, need to crop to center
-        start_h = (new_h - h) // 2
-        start_w = (new_w - w) // 2
-        padded = resized[start_h:start_h+h, start_w:start_w+w]
-
-    return padded
+    return resized
 
 
 def create_multi_resolution_batch(images: List[np.ndarray],
                                 scales: List[float] = [0.5, 0.75, 1.0, 1.25, 1.5]) -> List[np.ndarray]:
     """
-    Create a batch with images at multiple resolutions.
+    Create a batch with images at multiple resolutions without cropping.
     This helps the model learn scale-invariant features.
 
     Args:
@@ -98,7 +77,7 @@ def create_multi_resolution_batch(images: List[np.ndarray],
         scales: List of scale factors to apply
 
     Returns:
-        List of images at various scales (padded to original size)
+        List of images at various scales (no cropping or padding applied)
     """
     multi_res_batch = []
 
@@ -111,85 +90,41 @@ def create_multi_resolution_batch(images: List[np.ndarray],
         new_h = int(h * scale)
         new_w = int(w * scale)
 
-        # Resize
+        # Resize - no padding or cropping
         resized = cv2.resize(img, (new_w, new_h), interpolation=cv2.INTER_LINEAR)
 
-        # Pad or crop to original size
-        if scale < 1.0:
-            # Pad
-            pad_h = h - new_h
-            pad_w = w - new_w
-            top = pad_h // 2
-            bottom = pad_h - top
-            left = pad_w // 2
-            right = pad_w - left
-            final_img = cv2.copyMakeBorder(resized, top, bottom, left, right,
-                                         cv2.BORDER_CONSTANT, value=0)
-        else:
-            # Crop center
-            start_h = (new_h - h) // 2
-            start_w = (new_w - w) // 2
-            final_img = resized[start_h:start_h+h, start_w:start_w+w]
-
-        multi_res_batch.append(final_img)
+        multi_res_batch.append(resized)
 
     return multi_res_batch
-
-
-def resolution_mixup(image1: np.ndarray, image2: np.ndarray,
-                    alpha: float = 0.2) -> np.ndarray:
-    """
-    Mix two images at different resolutions.
-    This creates training samples that are combinations of different scales.
-
-    Args:
-        image1: First image
-        image2: Second image
-        alpha: Mixing parameter (0 = all image1, 1 = all image2)
-
-    Returns:
-        Mixed image
-    """
-    # Ensure images have same shape
-    assert image1.shape == image2.shape, "Images must have same shape for mixup"
-
-    # Simple weighted average
-    mixed = (1 - alpha) * image1 + alpha * image2
-
-    # Ensure output is in valid range
-    mixed = np.clip(mixed, 0, 255).astype(image1.dtype)
-
-    return mixed
 
 
 def apply_mixed_resolution_ops(images: List[np.ndarray],
                              use_random_resize: bool = True,
                              use_multi_resolution: bool = True,
-                             use_resolution_mixup: bool = True,
+                             use_flip: bool = True,
                              min_scale: float = 0.5,
                              max_scale: float = 1.5,
-                             resolution_scales: List[float] = [0.5, 0.75, 1.0, 1.25, 1.5],
-                             mixup_alpha: float = 0.2) -> List[np.ndarray]:
+                             resolution_scales: List[float] = [0.5, 0.75, 1.0, 1.25, 1.5]) -> List[np.ndarray]:
     """
     Apply mixed resolution operations to a batch of images.
+    Only performs rescaling and flipping - no cropping or padding.
 
     Args:
         images: List of input images
-        use_random_resize: Whether to apply random resize with padding
+        use_random_resize: Whether to apply random resize
         use_multi_resolution: Whether to create multi-resolution batch
-        use_resolution_mixup: Whether to apply resolution mixup
+        use_flip: Whether to apply random flipping
         min_scale: Minimum scale for random resize
         max_scale: Maximum scale for random resize
         resolution_scales: Scales for multi-resolution batch
-        mixup_alpha: Alpha parameter for mixup
 
     Returns:
-        List of processed images
+        List of processed images (dimensions may vary, no cropping applied)
     """
     logger.debug(f"Applying mixed resolution ops to {len(images)} images")
     processed_images = images.copy()
 
-    # Random resize with padding
+    # Random resize (no padding or cropping)
     if use_random_resize:
         processed_images = [random_resize_with_pad(img, min_scale, max_scale)
                           for img in processed_images]
@@ -198,15 +133,18 @@ def apply_mixed_resolution_ops(images: List[np.ndarray],
     if use_multi_resolution:
         processed_images = create_multi_resolution_batch(processed_images, resolution_scales)
 
-    # Resolution mixup (only if we have at least 2 images)
-    if use_resolution_mixup and len(processed_images) >= 2:
-        # Randomly select pairs and mix them
-        for i in range(0, len(processed_images) - 1, 2):
-            if i + 1 < len(processed_images):
-                alpha = np.random.beta(mixup_alpha, mixup_alpha)
-                processed_images[i] = resolution_mixup(processed_images[i],
-                                                     processed_images[i + 1],
-                                                     alpha)
+    # Random flipping
+    if use_flip:
+        flipped_images = []
+        for img in processed_images:
+            # Random horizontal flip
+            if np.random.random() < 0.5:
+                img = cv2.flip(img, 1)
+            # Random vertical flip
+            if np.random.random() < 0.5:
+                img = cv2.flip(img, 0)
+            flipped_images.append(img)
+        processed_images = flipped_images
 
     logger.debug(f"Completed apply_mixed_resolution_ops")
     return processed_images
@@ -371,6 +309,8 @@ def populate(X_array, y_array, path, use_nir=False, end=False, gcs_handler=None,
 
     # Log data loaded
     logger.info(f"Loaded {len(X_array)} images from {path}")
+    logger.info(f"X_array preprocess {X_array}")
+    logger.info(f"y_array preprocess {y_array}")
 
     return X_array, y_array
 
