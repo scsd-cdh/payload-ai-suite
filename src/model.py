@@ -215,7 +215,9 @@ def train(validate=True, epochs=50, use_nir=False, use_gcs=False,
     val_loss = history.history['val_loss']
 
     if validate:
-        test_loss, test_accuracy = model.evaluate(X_test, y_test)
+        evaluation_results = model.evaluate(X_test, y_test)
+        test_loss = evaluation_results[0]
+        test_accuracy = evaluation_results[1]
         logger.info(f'Test accuracy: {test_accuracy:.4f}')
         epochs_range = range(len(accuracy))
         plt.plot(epochs_range, accuracy, 'r', label='Training accuracy')
