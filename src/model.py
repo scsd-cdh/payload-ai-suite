@@ -155,11 +155,9 @@ def train(validate=True, epochs=50, use_nir=False, use_gcs=False,
         top_model = bottom_model.output
         top_model = keras.layers.GlobalAveragePooling2D()(top_model)
         top_model = keras.layers.Dense(1024, activation='relu')(top_model)
-        top_model = keras.layers.Dropout(0.5)(top_model)
+        top_model = keras.layers.Dropout(0.2)(top_model)
         top_model = keras.layers.Dense(1024, activation='relu')(top_model)
-        top_model = keras.layers.Dropout(0.5)(top_model)
         top_model = keras.layers.Dense(512, activation='relu')(top_model)
-        top_model = keras.layers.Dropout(0.3)(top_model)
         output = keras.layers.Dense(num_classes, activation='softmax')(top_model)
         return output
 
@@ -168,7 +166,11 @@ def train(validate=True, epochs=50, use_nir=False, use_gcs=False,
     model = keras.models.Model(inputs=resnet50.input, outputs=head)
 
     model.summary(print_fn=logger.info)
-    model.compile(optimizer='adam', loss='categorical_crossentropy', metrics=['accuracy'])
+    model.compile(
+        optimizer=tf.keras.optimizers.Adam(learning_rate=1e-4),
+        loss='categorical_crossentropy',
+        metrics=['accuracy', tf.keras.metrics.Precision(), tf.keras.metrics.Recall()]
+    )
 
     checkpoint_path = "training_checkpoints/cp.weights.h5"
     checkpoint_dir = os.path.dirname(checkpoint_path)
@@ -183,7 +185,20 @@ def train(validate=True, epochs=50, use_nir=False, use_gcs=False,
                                                      save_weights_only=True,
                                                      verbose=1)
 
-    early_stopping = tf.keras.callbacks.EarlyStopping(monitor='val_loss', patience=3)
+    early_stopping = tf.keras.callbacks.EarlyStopping(
+        monitor='val_loss',
+        patience=10,
+        restore_best_weights=True,
+        verbose=1
+    )
+
+    reduce_lr = tf.keras.callbacks.ReduceLROnPlateau(
+        monitor='val_loss',
+        factor=0.5,
+        patience=3,
+        min_lr=1e-7,
+        verbose=1
+    )
 
     history = model.fit(X_train, y_train,
                         epochs=50,
@@ -192,7 +207,7 @@ def train(validate=True, epochs=50, use_nir=False, use_gcs=False,
                         initial_epoch=0,
                         shuffle=True,
                         class_weight=class_weights,
-                        callbacks=[cp_callback, early_stopping])
+                        callbacks=[cp_callback, early_stopping, reduce_lr])
 
     accuracy = history.history['accuracy']
     val_accuracy = history.history['val_accuracy']
