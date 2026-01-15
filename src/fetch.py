@@ -755,9 +755,8 @@ def enmap_query(use_gcs=False, amount=135):
                 
                 
                 assets_to_download = []
-                # grab swir and vnir assets
-                # theres also image and metadata assets, not sure if we want these nor do i know whats inside them
-                for key in ['vnir', 'swir']:
+                # Grab the main Spectral Image (likely contains full VNIR/SWIR cubes)
+                for key in ['image']:
                     if key in item.assets:
                         assets_to_download.append((key, item.assets[key]))
                 
