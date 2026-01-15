@@ -755,18 +755,11 @@ def enmap_query(use_gcs=False, amount=135):
                 
                 
                 assets_to_download = []
-                # Grab the main Spectral Image (likely contains full VNIR/SWIR cubes)
+                # grab the iamge artifact, this is the main product
                 for key in ['image']:
                     if key in item.assets:
                         assets_to_download.append((key, item.assets[key]))
                 
-                # # If no main product, try looking for individual bands if they exist (unlikely for EnMAP L2A usually zipped)
-                # if not assets_to_download:
-                #      # fallback to first asset that is not metadata/preview
-                #      for key, asset in item.assets.items():
-                #          if asset.media_type not in ['application/json', 'image/jpeg', 'image/png'] and 'metadata' not in key:
-                #              assets_to_download.append((key, asset))
-                #              break
 
                 if not assets_to_download:
                     logger.warning(f"No suitable download asset found for {item.id}")
@@ -807,21 +800,10 @@ def enmap_query(use_gcs=False, amount=135):
                          
                                 if use_gcs:
                                      gcs = GCSHandler()
-                                     gcs_path = f"raw_data/enmap/to_process/{datetime.now().strftime('%Y%m%d')}/{loc.geohash}/{filename}"
-                                     # GCS handler doesn't support streaming upload easily without rewrite.
-                                     # For now, buffer in memory if < 500MB, else temp file.
-                                     # Re-using write_image logic effectively for consistency with existing tool if appropriate.
-                                     
-                                     # Actually default 'write_image' function handles generic response.
-                                     # But EnMAP files might be huge.
-                                     # Let's use a temp mapping
-                                     
-                                     # Let's assume we can load it for now or modify write_image later.
-                                     # modifying write_image is out of scope unless necessary. 
-                                     # I'll simply write locally and then upload if GCS.
+                                     gcs_path = f"raw_data/enmap/to_process/{datetime.now().strftime('%Y%m%d')}/{filename}"
                                      
                                      # Download to temp
-                                     temp_dir = resolve_path("data/temp")
+                                     temp_dir = resolve_path("data/enmap")
                                      os.makedirs(temp_dir, exist_ok=True)
                                      temp_path = os.path.join(temp_dir, filename)
                                      
