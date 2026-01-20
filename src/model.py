@@ -201,7 +201,7 @@ def train(validate=True, epochs=50, use_nir=False, use_gcs=False,
     )
 
     history = model.fit(X_train, y_train,
-                        epochs=50,
+                        epochs=epochs,
                         validation_data=(X_test, y_test),
                         verbose=1,
                         initial_epoch=0,
