@@ -69,6 +69,7 @@ if __name__ == "__main__":
     parser.add_argument('--fusion-technique', required=False, type=str, default='enhanced_red', choices=['enhanced_red', 'hsv', 'none'], help="RGB-NIR fusion technique")
     parser.add_argument('--fusion-alpha', required=False, type=float, default=0.5, help="Alpha parameter for enhanced_red fusion (0-1)")
     parser.add_argument('--degrade-gsd', required=False, action='store_true', help="Degrade imagery to CubeSat GSD (~85m from 10m Sentinel-2)")
+    parser.add_argument('--use-class-weights', required=False, action='store_true', help="Use balanced class weights during training")
     parser.add_argument("--compress-image", required=False, type=str, help="Path to the input .NEF image")
 
     args = parser.parse_args()
@@ -77,7 +78,8 @@ if __name__ == "__main__":
                                     use_mixed_res=args.use_mixed_res, epochs=args.epochs,
                                     fusion_technique=args.fusion_technique,
                                     fusion_alpha=args.fusion_alpha,
-                                    degrade_gsd=args.degrade_gsd)
+                                    degrade_gsd=args.degrade_gsd,
+                                    use_class_weights=args.use_class_weights)
         print(f"\nTraining complete! Experiment ID: {experiment_id}")
     elif args.nasa_firms:
         nasa_firms_api()

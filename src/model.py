@@ -36,7 +36,7 @@ logger = logging.getLogger(__name__)
 
 def train(validate=True, epochs=50, use_nir=False, use_gcs=False,
           use_mixed_res=False, mixed_res_config=None, fusion_technique='enhanced_red',
-          fusion_alpha=0.5, degrade_gsd=False):
+          fusion_alpha=0.5, degrade_gsd=False, use_class_weights=False):
     """
     Train CNN ResNet50 model on labeled data.
 
@@ -50,6 +50,7 @@ def train(validate=True, epochs=50, use_nir=False, use_gcs=False,
         fusion_technique (str): RGB-NIR fusion technique ('enhanced_red', 'hsv', 'none').
         fusion_alpha (float): Alpha parameter for enhanced_red fusion.
         degrade_gsd (bool): Whether to degrade imagery to CubeSat GSD (~85m from 10m).
+        use_class_weights (bool): Whether to use balanced class weights during training.
 
     Returns:
         str: Experiment ID for this training run
@@ -111,8 +112,7 @@ def train(validate=True, epochs=50, use_nir=False, use_gcs=False,
 
     label_encoder = preprocessing.LabelEncoder()
     y_train = label_encoder.fit_transform(y_train)
-    # Should this be just fit instead of fit_transform?
-    y_test = label_encoder.fit_transform(y_test)
+    y_test = label_encoder.transform(y_test)
 
     # Compute balanced class weights
     class_weights_array = compute_class_weight(
@@ -169,7 +169,9 @@ def train(validate=True, epochs=50, use_nir=False, use_gcs=False,
     model.compile(
         optimizer=tf.keras.optimizers.Adam(learning_rate=1e-4),
         loss='categorical_crossentropy',
-        metrics=['accuracy', tf.keras.metrics.Precision(), tf.keras.metrics.Recall()]
+        metrics=['accuracy',
+                 tf.keras.metrics.Precision(class_id=1, name='precision'),
+                 tf.keras.metrics.Recall(class_id=1, name='recall')]
     )
 
     checkpoint_path = "training_checkpoints/cp.weights.h5"
@@ -206,7 +208,7 @@ def train(validate=True, epochs=50, use_nir=False, use_gcs=False,
                         verbose=1,
                         initial_epoch=0,
                         shuffle=True,
-                        class_weight=class_weights,
+                        class_weight=class_weights if use_class_weights else None,
                         callbacks=[cp_callback, early_stopping, reduce_lr])
 
     accuracy = history.history['accuracy']
