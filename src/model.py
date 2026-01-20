@@ -22,9 +22,11 @@ import numpy as np
 import onnxruntime as rt
 from sklearn import preprocessing
 from sklearn.model_selection import train_test_split
+from sklearn.utils.class_weight import compute_class_weight
 import matplotlib.pyplot as plt
 import logging
 from mlops import GCSHandler
+from metrics import ModelEvaluator
 from paths import resolve_path, get_model_path
 from mixed_res_config import DEFAULT_MIXED_RES_CONFIG
 import experiment_tracker
@@ -32,9 +34,9 @@ import experiment_tracker
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
-def train(validate=True, epochs=12, use_nir=False, use_gcs=False,
+def train(validate=True, epochs=50, use_nir=False, use_gcs=False,
           use_mixed_res=False, mixed_res_config=None, fusion_technique='enhanced_red',
-          fusion_alpha=0.5, degrade_gsd=False):
+          fusion_alpha=0.5, degrade_gsd=False, use_class_weights=False):
     """
     Train CNN ResNet50 model on labeled data.
 
@@ -48,6 +50,7 @@ def train(validate=True, epochs=12, use_nir=False, use_gcs=False,
         fusion_technique (str): RGB-NIR fusion technique ('enhanced_red', 'hsv', 'none').
         fusion_alpha (float): Alpha parameter for enhanced_red fusion.
         degrade_gsd (bool): Whether to degrade imagery to CubeSat GSD (~85m from 10m).
+        use_class_weights (bool): Whether to use balanced class weights during training.
 
     Returns:
         str: Experiment ID for this training run
@@ -109,20 +112,25 @@ def train(validate=True, epochs=12, use_nir=False, use_gcs=False,
 
     label_encoder = preprocessing.LabelEncoder()
     y_train = label_encoder.fit_transform(y_train)
-    y_test = label_encoder.fit_transform(y_test)
+    y_test = label_encoder.transform(y_test)
 
-    y_train = tf.keras.utils.to_categorical(y_train, num_classes=2)
-    y_test = tf.keras.utils.to_categorical(y_test, num_classes=2)
+    # Compute balanced class weights
+    class_weights_array = compute_class_weight(
+        class_weight='balanced',
+        classes=np.unique(y_train),
+        y=y_train
+    )
 
     y_train = np.array(y_train)
     X_train = np.array(X_train)
     y_test = np.array(y_test)
     X_test = np.array(X_test)
 
-    logger.info(f"Shape of an image in X_train: {X_train.shape}")
-    logger.info(f"Shape of an image in X_test: {X_test.shape}")
-    logger.info(f"y_train Shape: {y_train.shape}")
-    logger.info(f"y_test Shape: {y_test.shape}")
+    y_train = tf.keras.utils.to_categorical(y_train, num_classes=2)
+    y_test = tf.keras.utils.to_categorical(y_test, num_classes=2)
+
+    class_weights = {i: weight for i, weight in enumerate(class_weights_array)}
+    logger.info(f"Computed class weights: {class_weights}")
 
     input_channels = 4 if use_nir else 3
     input_shape = (224, 224, input_channels)
@@ -134,7 +142,6 @@ def train(validate=True, epochs=12, use_nir=False, use_gcs=False,
         include_top=False,
         input_shape=input_shape
     )
-    #since ResNet50 is pre-trained w/ 3-channel RGB images, this if-else ensure it runs on a 4-channel system
 
     # Here we freeze the last 4 layers
     # Layers are set to trainable as True by default
@@ -148,11 +155,9 @@ def train(validate=True, epochs=12, use_nir=False, use_gcs=False,
         top_model = bottom_model.output
         top_model = keras.layers.GlobalAveragePooling2D()(top_model)
         top_model = keras.layers.Dense(1024, activation='relu')(top_model)
-        top_model = keras.layers.Dropout(0.5)(top_model)
+        top_model = keras.layers.Dropout(0.2)(top_model)
         top_model = keras.layers.Dense(1024, activation='relu')(top_model)
-        top_model = keras.layers.Dropout(0.5)(top_model)
         top_model = keras.layers.Dense(512, activation='relu')(top_model)
-        top_model = keras.layers.Dropout(0.3)(top_model)
         output = keras.layers.Dense(num_classes, activation='softmax')(top_model)
         return output
 
@@ -161,7 +166,13 @@ def train(validate=True, epochs=12, use_nir=False, use_gcs=False,
     model = keras.models.Model(inputs=resnet50.input, outputs=head)
 
     model.summary(print_fn=logger.info)
-    model.compile(optimizer='adam', loss='categorical_crossentropy', metrics=['accuracy'])
+    model.compile(
+        optimizer=tf.keras.optimizers.Adam(learning_rate=1e-4),
+        loss='categorical_crossentropy',
+        metrics=['accuracy',
+                 tf.keras.metrics.Precision(class_id=1, name='precision'),
+                 tf.keras.metrics.Recall(class_id=1, name='recall')]
+    )
 
     checkpoint_path = "training_checkpoints/cp.weights.h5"
     checkpoint_dir = os.path.dirname(checkpoint_path)
@@ -176,7 +187,20 @@ def train(validate=True, epochs=12, use_nir=False, use_gcs=False,
                                                      save_weights_only=True,
                                                      verbose=1)
 
-    early_stopping = tf.keras.callbacks.EarlyStopping(monitor='val_loss', patience=3)
+    early_stopping = tf.keras.callbacks.EarlyStopping(
+        monitor='val_loss',
+        patience=10,
+        restore_best_weights=True,
+        verbose=1
+    )
+
+    reduce_lr = tf.keras.callbacks.ReduceLROnPlateau(
+        monitor='val_loss',
+        factor=0.5,
+        patience=3,
+        min_lr=1e-7,
+        verbose=1
+    )
 
     history = model.fit(X_train, y_train,
                         epochs=epochs,
@@ -184,7 +208,8 @@ def train(validate=True, epochs=12, use_nir=False, use_gcs=False,
                         verbose=1,
                         initial_epoch=0,
                         shuffle=True,
-                        callbacks=[cp_callback, early_stopping])
+                        class_weight=class_weights if use_class_weights else None,
+                        callbacks=[cp_callback, early_stopping, reduce_lr])
 
     accuracy = history.history['accuracy']
     val_accuracy = history.history['val_accuracy']
@@ -192,7 +217,9 @@ def train(validate=True, epochs=12, use_nir=False, use_gcs=False,
     val_loss = history.history['val_loss']
 
     if validate:
-        test_loss, test_accuracy = model.evaluate(X_test, y_test)
+        evaluation_results = model.evaluate(X_test, y_test)
+        test_loss = evaluation_results[0]
+        test_accuracy = evaluation_results[1]
         logger.info(f'Test accuracy: {test_accuracy:.4f}')
         epochs_range = range(len(accuracy))
         plt.plot(epochs_range, accuracy, 'r', label='Training accuracy')
@@ -200,13 +227,18 @@ def train(validate=True, epochs=12, use_nir=False, use_gcs=False,
         plt.title('Training and validation accuracy')
         plt.legend(loc=0)
 
-        # Save experiment
         exp_dir = experiment_tracker.create_experiment_directory(experiment_id)
         plot_filename = os.path.join(exp_dir, "training_plot.png")
         plt.savefig(plot_filename)
+        # plt.close()
 
         model_filename = os.path.join(exp_dir, f"model_{experiment_id}.onnx")
         export_to_onnx(model, model_filename)
+
+        evaluator = ModelEvaluator(experiment_id, exp_dir)
+
+
+        evaluation_metrics = evaluator.evaluate_and_save_all(X_test, y_test, model)
 
         experiment_tracker.save_experiment_config(
             experiment_id,
@@ -244,13 +276,12 @@ def train(validate=True, epochs=12, use_nir=False, use_gcs=False,
                 "test_loss": float(test_loss)
             },
             model_filename,
-            plot_filename
+            plot_filename,
+            evaluation_metrics
         )
 
         logger.info(f"Experiment {experiment_id} saved to {exp_dir}")
 
-        # plt.figure()
-        # plt.show()
 
     return experiment_id
 
