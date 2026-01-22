@@ -10,7 +10,8 @@ from fetch import (
     batch_data_downloader_selenium,
     retrieve_eonet_cross_reference,
     copernicus_query,
-    convert_sen2fire_labeled
+    convert_sen2fire_labeled,
+    enmap_query
 )
 from postprocess import (
     test_ccds
@@ -52,6 +53,7 @@ if __name__ == "__main__":
     parser.add_argument('--batch-download', required=False, action='store_true', help="Download images using Selenium")
     parser.add_argument('--eonet-crossref', required=False, action='store_true', help="Fetch wildfire data from the EONET API")
     parser.add_argument('--copernicus-query', required=False, action='store_true', help="Query Sentinel data from Copernicus")
+    parser.add_argument('--enmap-query', required=False, action='store_true', help="Query EnMAP data from DLR STAC")
     parser.add_argument('--coordinates', required=False, nargs=2, type=float, metavar=('LON', 'LAT'),
                         help="Specify coordinates for the query in the format: LON LAT")
     parser.add_argument('--time-range', required=False, nargs=2, metavar=('FROM', 'TO'),
@@ -91,6 +93,8 @@ if __name__ == "__main__":
         retrieve_eonet_cross_reference()
     elif args.copernicus_query:
         copernicus_query(use_gcs=args.use_gcs)
+    elif args.enmap_query:
+        enmap_query(use_gcs=args.use_gcs)
     elif args.multimodal_qc:
         import mlops
         mlops.run_multimodal_qc(use_gcs=args.use_gcs, input_path=args.qc_path)
