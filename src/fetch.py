@@ -22,12 +22,21 @@ from selenium.webdriver.common.by import By
 from pyproj import Proj, Transformer
 
 from PIL import Image
+import tifffile
+import cv2
 
 import logging
 import pystac_client
 from requests.auth import HTTPBasicAuth
 
 logger = logging.getLogger(__name__)
+
+# EnMAP STAC Configuration
+STAC_URL = "https://geoservice.dlr.de/eoc/ogc/stac/v1"
+COLLECTION_ID = "ENMAP_HSI_L2A"
+DLR_USER = os.getenv("DLR_USER")
+DLR_PASS = os.getenv("DLR_PASS")
+
 
 class Source(Enum):
     EONET = "eonet"
@@ -681,24 +690,39 @@ def copernicus_query(use_gcs=False, amount=135):
 
 
 def enmap_query(use_gcs=False, amount=135):
-    """
-    Queries EnMAP data from the DLR STAC API.
-    """
-    DLR_USER = os.getenv("DLR_USER")
-    DLR_PASS = os.getenv("DLR_PASS")
-
-    if not DLR_USER or not DLR_PASS:
-        logger.error("DLR_USER and DLR_PASS environment variables must be set.")
-        return
-
-    STAC_URL = "https://geoservice.dlr.de/eoc/ogc/stac/v1"
-    COLLECTION_ID = "ENMAP_HSI_L2A"
-
+    """Query, download, and process EnMAP hyperspectral data for ML pipeline integration."""
     locations = {}
     progress_tracker = ProgressTracker()
 
-    # Reuse location creation logic 
-    # Check FIRMS and EONET
+    _gather_locations(locations, amount, progress_tracker)
+    
+    if not locations:
+        logger.warning("No target locations found for EnMAP processing.")
+        return
+
+    client = _setup_stac_client()
+    if not client:
+        return
+
+    session = requests.Session()
+    session.auth = HTTPBasicAuth(DLR_USER, DLR_PASS)
+    
+    for source, source_locations in locations.items():
+        for loc in source_locations:
+            try:
+                item = _search_enmap_item(client, loc)
+                if not item:
+                    continue
+
+                _download_and_process_item(item, loc, session, progress_tracker, use_gcs=use_gcs)
+
+            except Exception as e:
+                logger.error(f"EnMAP query failed [Geohash: {loc.geohash}]: {e}")
+
+# --- Helper Methods ---
+
+def _gather_locations(locations, amount, progress_tracker):
+    """Gathers locations from FIRMS and EONET."""
     try:
         firms_locations = create_locations(source=Source.FIRMS, amount=amount, progress_tracker=progress_tracker)
         if firms_locations:
@@ -712,132 +736,140 @@ def enmap_query(use_gcs=False, amount=135):
             locations[Source.EONET] = eonet_locations
     except Exception as e:
         logger.warning(f"EONET location creation failed: {e}")
-    
-    if not locations:
-        logger.warning("No locations found to process for EnMAP.")
-        return
 
-    # Authenticated session
-    session = requests.Session()
-    session.auth = HTTPBasicAuth(DLR_USER, DLR_PASS)
-
+def _setup_stac_client():
+    """Initialize Pystac client for the DLR STAC API."""
     try:
-        client = pystac_client.Client.open(STAC_URL)
+        return pystac_client.Client.open(STAC_URL)
     except Exception as e:
-        logger.error(f"Failed to open STAC client: {e}")
+        logger.error(f"Failed to connect to STAC endpoint: {e}")
+        return None
+
+def _search_enmap_item(client, loc):
+    """Find the best matching EnMAP scene for a specific location and timeframe."""
+    bbox = loc.bbox['bbox']
+    time_range = f"{loc.time['from']}/{loc.time['to']}"
+    
+    logger.info(f"Searching EnMAP: {loc.geohash} ({time_range})")
+
+    search = client.search(
+        collections=[COLLECTION_ID],
+        bbox=bbox,
+        datetime=time_range,
+        max_items=1
+    )
+    items = list(search.items())
+    if not items:
+        logger.info(f"No EnMAP data found for {loc.geohash}")
+        return None
+    
+    item = items[0]
+    logger.info(f"Found EnMAP item: {item.id}")
+    return item
+
+def _download_and_process_item(item, loc, session, progress_tracker, use_gcs=False):
+    """Downloads the image asset and processes it."""
+    # Find image asset
+    image_asset = item.assets.get('image')
+    if not image_asset:
+        logger.warning(f"No 'image' asset found for {item.id}")
         return
 
-    for source, source_locations in locations.items():
-        for loc in source_locations:
-            try:
-                # Construct bbox and time range
-                bbox = loc.bbox['bbox']
-                time_range = f"{loc.time['from']}/{loc.time['to']}"
-                
-                logger.info(f"Searching EnMAP for {loc.geohash} in range {time_range}")
-
-                # Search for our enmap product
-                search = client.search(
-                    collections=[COLLECTION_ID],
-                    bbox=bbox,
-                    datetime=time_range,
-                    # OPTIONAL, only grabbing the first/best one
-                    max_items=1
-                )
-                
-                items = list(search.items())
-                if not items:
-                    logger.info(f"No EnMAP data found for {loc.geohash}")
-                    continue
-
-                item = items[0]
-                logger.info(f"Found EnMAP item: {item.id}")
-                
-                
-                assets_to_download = []
-                # grab the iamge artifact, this is the main product
-                for key in ['image']:
-                    if key in item.assets:
-                        assets_to_download.append((key, item.assets[key]))
-                
-
-                if not assets_to_download:
-                    logger.warning(f"No suitable download asset found for {item.id}")
-                    continue
-
-                for key, asset in assets_to_download:
-                    href = asset.href
-                    logger.info(f"Downloading {key} from {href}")
-                    
-                    # Download with authentication
-                    max_retries = 3
-                    for attempt in range(max_retries):
-                        try:
-                            # Verify session is still valid or recreate if needed (though hard to know without trying)
-                            # For 403s on "concurrent session", maybe we need to be careful?
-                            with session.get(href, stream=True) as r:
-                                if r.status_code == 403:
-                                    logger.warning(f"Got 403 Forbidden. Attempt {attempt+1}/{max_retries}. Message: {r.text[:200]}")
-                                    # specific logic: if concurrent session, maybe wait?
-                                    if "concurrent active session" in r.text:
-                                        wait_time = 5 * (attempt + 1)
-                                        logger.info(f"Waiting {wait_time}s before retrying due to concurrent session error...")
-                                        time.sleep(wait_time)
-                                        continue
-                                
-                                if not r.ok:
-                                    logger.error(f"Download failed for {href}: {r.status_code} {r.reason}")
-                                    logger.error(f"Response content: {r.text[:500]}") # Log first 500 chars
-                                r.raise_for_status()
-                                
-                                # Determine filename
-                                filename = href.split('/')[-1].split('?')[0] # remove query params if any
-                                # If filename is empty or generic, use item id
-                                if not filename or len(filename) < 5:
-                                     ext = mimetypes.guess_extension(format) or ".zip"
-                                     filename = f"{item.id}{ext}"
-        
-                         
-                                if use_gcs:
-                                     gcs = GCSHandler()
-                                     gcs_path = f"raw_data/enmap/to_process/{datetime.now().strftime('%Y%m%d')}/{filename}"
-                                     
-                                     # Download to temp
-                                     temp_dir = resolve_path("data/enmap")
-                                     os.makedirs(temp_dir, exist_ok=True)
-                                     temp_path = os.path.join(temp_dir, filename)
-                                     
-                                     with open(temp_path, 'wb') as f:
-                                         for chunk in r.iter_content(chunk_size=8192):
-                                             f.write(chunk)
-                                     
-                                     # Upload
-                                     gcs.upload_file(temp_path, gcs_path)
-                                     logger.info(f"Uploaded to {gcs_path}")
-                                     os.remove(temp_path)
-        
-                                else:
-                                    # Local save
-                                    directory = resolve_path("data/enmap")
-                                    os.makedirs(directory, exist_ok=True)
-                                    out_path = os.path.join(directory, f"{loc.geohash}_{filename}")
-                                    
-                                    with open(out_path, 'wb') as f:
-                                        for chunk in r.iter_content(chunk_size=8192):
-                                            f.write(chunk)
-                                    logger.info(f"Saved to {out_path}")
-                            
-                            # If we get here, success! break retry loop
-                            break
+    href = image_asset.href
+    logger.info(f"Downloading image from {href}")
     
-                        except requests.exceptions.RequestException as e:
-                             logger.error(f"Download request failed for {href}: {e}")
-                             if e.response is not None:
-                                  logger.error(f"Error response content: {e.response.text[:500]}")
-                             # Don't break immediately, let loop continue
-            
-            except Exception as e:
-                 logger.error(f"Error processing EnMAP for {loc.geohash}: {e}")
+    max_retries = 3
+    for attempt in range(max_retries):
+        try:
+            with session.get(href, stream=True) as r:
+                if r.status_code == 403:
+                     logger.warning(f"Got 403 Forbidden. Attempt {attempt+1}/{max_retries}.")
+                     if "concurrent active session" in r.text:
+                          time.sleep(5 * (attempt + 1))
+                          continue
+                
+                r.raise_for_status()
+                
+                # Determine filename
+                filename = f"{item.id}.TIF"
+                temp_path = f"/tmp/{filename}"
+                
+                with open(temp_path, 'wb') as f:
+                    for chunk in r.iter_content(chunk_size=8192 * 4):
+                        f.write(chunk)
+                
+                # Process
+                _process_enmap_file(temp_path, loc, progress_tracker, use_gcs=use_gcs)
+                
+                # Cleanup
+                if os.path.exists(temp_path):
+                        os.remove(temp_path)
+                return 
+
+        except Exception as e:
+             logger.error(f"Download/Process failed for {href}: {e}")
+             if attempt == max_retries - 1:
+                  progress_tracker.update_event_progress(loc.geohash, location_index=0, status="failed")
+
+def _process_enmap_file(temp_path, loc, progress_tracker, use_gcs=False):
+    """Extract mission-critical spectral bands, normalize data, and save as 4-channel PNG."""
+    try:
+        logger.info(f"Processing hyperspectral cube: {temp_path}")
+        img = tifffile.imread(temp_path)
+        
+        # Standardize to (H, W, Channels)
+        if len(img.shape) == 3 and img.shape[0] < img.shape[1] and img.shape[0] < img.shape[2]:
+             img = np.transpose(img, (1, 2, 0))
+
+        # Band extraction for ResNet50 compatibility (RGB + NIR)
+        # VNIR bands ~6.5nm spacing, starting at 420nm
+        # Indices: Blue (B9), Green (B21), Red (B36), NIR (B66)
+        needed_bands = 70
+        if img.ndim == 3 and img.shape[-1] >= needed_bands:
+            red = img[:, :, 36]
+            green = img[:, :, 21]
+            blue = img[:, :, 9]
+            nir = img[:, :, 66]
+            processed_img = np.stack([blue, green, red, nir], axis=-1).astype(np.float32)
+        else:
+             logger.warning("Insufficient bands for specific spectral selection; using fallback.")
+             processed_img = img[:, :, :3].astype(np.float32) if img.ndim == 3 else img.astype(np.float32)
+
+        # Per-channel contrast optimization (2nd-98th percentile)
+        normalized_img = np.zeros_like(processed_img)
+        for ch in range(processed_img.shape[2]):
+            band = processed_img[:, :, ch]
+            valid = (band > -100) & (band != 0) # Filter nodata
+            if valid.any():
+                p2, p98 = np.percentile(band[valid], (2, 98))
+                if p98 > p2:
+                     normalized_img[:, :, ch] = np.clip((band - p2) / (p98 - p2), 0, 1) * 255
+        
+        processed_img = normalized_img.astype(np.uint8)
+
+        # Save result
+        if use_gcs:
+            from mlops import GCSHandler
+            handler = GCSHandler()
+            success, buffer = cv2.imencode('.png', processed_img)
+            if success:
+                blob_name = f"enmap/{loc.geohash}/image.png"
+                handler.upload_bytes(buffer.tobytes(), blob_name, content_type='image/png')
+                logger.info(f"Uploaded to GCS: {blob_name}")
+            else:
+                 logger.error("Failed to encode image for GCS upload.")
+        else:
+            output_dir = resolve_path(f"output/enmap/{loc.geohash}")
+            os.makedirs(output_dir, exist_ok=True)
+            final_path = os.path.join(output_dir, "image.png")
+            cv2.imwrite(final_path, processed_img)
+            logger.info(f"Final RGBA export: {final_path}")
+
+        progress_tracker.update_event_progress(loc.geohash, location_index=0, status="completed")
+
+    except Exception as e:
+        logger.error(f"EnMAP processing failure: {e}")
+        raise e
 
 
 def batch_data_downloader_selenium(url=None, max_pages=9):
