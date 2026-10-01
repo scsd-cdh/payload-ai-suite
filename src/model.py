@@ -319,7 +319,7 @@ def run_inference(onnx_model=None, data_target=None):
     if data_target is None:
         logger.error("Please provide a test target")
         return None
-    session = rt.InferenceSession(onnx_model, providers=rt.get_available_providers)
+    session = rt.InferenceSession(onnx_model, providers=rt.get_available_providers())
     input_name = session.get_inputs()[0].name
     prediction_onnx = session.run(None, {input_name: data_target.astype(np.float32)})[0]
     logger.info(f"Prediction: {prediction_onnx}")
