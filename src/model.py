@@ -316,10 +316,11 @@ def export_to_onnx(model, filename=None):
 def run_inference(onnx_model=None, data_target=None):
     if onnx_model is None:
         onnx_model = get_model_path('zetane.onnx')
-    if not data_target.any():
+    if data_target is None:
         logger.error("Please provide a test target")
-        return
-    session = rt.InferenceSession(onnx_model, providers=rt.get_available_providers)
+        return None
+    session = rt.InferenceSession(onnx_model, providers=rt.get_available_providers())
     input_name = session.get_inputs()[0].name
     prediction_onnx = session.run(None, {input_name: data_target.astype(np.float32)})[0]
     logger.info(f"Prediction: {prediction_onnx}")
+    return prediction_onnx
