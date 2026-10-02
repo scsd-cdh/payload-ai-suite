@@ -1,9 +1,10 @@
 """Resnet50 base model, 2 classes. First layers removed
 
 Features:
-- train
+- train (tasks: 'fire' or 'smoke')
 - validate
 - export to onnx
+- predict with an exported onnx model
 - mixed resolution operations for resolution-agnostic training
 
 TODO:
@@ -13,6 +14,7 @@ TODO:
 """
 
 import os
+import cv2
 import tensorflow as tf
 import keras
 import preprocess as preprocess
@@ -34,9 +36,23 @@ import experiment_tracker
 logging.basicConfig(level=logging.INFO)
 logger = logging.getLogger(__name__)
 
+# Data sources per task: (labeled subfolder, filename glob, explicit label, end).
+# Fire keeps its legacy path-derived labels; smoke uses explicit labels so that
+# LabelEncoder maps no_smoke -> 0 and smoke -> 1.
+TASK_SOURCES = {
+    'fire': [
+        ("labeled/yes", None, None, False),
+        ("labeled/no", None, None, True),
+    ],
+    'smoke': [
+        ("labeled/yes", "smoke_*.tif", "smoke", False),
+        ("labeled/no", "haze_*.tif", "no_smoke", False),
+    ],
+}
+
 def train(validate=True, epochs=50, use_nir=False, use_gcs=False,
           use_mixed_res=False, mixed_res_config=None, fusion_technique='enhanced_red',
-          fusion_alpha=0.5, degrade_gsd=False, use_class_weights=False):
+          fusion_alpha=0.5, degrade_gsd=False, use_class_weights=False, task='fire'):
     """
     Train CNN ResNet50 model on labeled data.
 
@@ -51,13 +67,19 @@ def train(validate=True, epochs=50, use_nir=False, use_gcs=False,
         fusion_alpha (float): Alpha parameter for enhanced_red fusion.
         degrade_gsd (bool): Whether to degrade imagery to CubeSat GSD (~85m from 10m).
         use_class_weights (bool): Whether to use balanced class weights during training.
+        task (str): What the classifier detects: 'fire' or 'smoke'.
 
     Returns:
         str: Experiment ID for this training run
     """
+    if task not in TASK_SOURCES:
+        raise ValueError(f"Unknown task '{task}', expected one of {list(TASK_SOURCES)}")
+    if task == 'smoke' and use_nir:
+        raise ValueError("Smoke training data is RGB only; --use-nir is not supported with --task smoke")
+
     # Generate experiment ID
     experiment_id = experiment_tracker.generate_experiment_id()
-    logger.info(f"Starting training experiment: {experiment_id}")
+    logger.info(f"Starting {task} training experiment: {experiment_id}")
 
     X = []
     y = []
@@ -66,43 +88,25 @@ def train(validate=True, epochs=50, use_nir=False, use_gcs=False,
     if use_mixed_res and mixed_res_config is None:
         mixed_res_config = DEFAULT_MIXED_RES_CONFIG
 
-    if use_gcs:
-        # Stream images from GCS
-        try:
-            gcs = GCSHandler()
+    try:
+        # Stream images from GCS, or use local files
+        gcs = GCSHandler() if use_gcs else None
 
-            # Pass GCS handler and mixed_res options to populate function
-            X, y = preprocess.populate(X, y, "labeled/yes", use_nir=use_nir,
-                          gcs_handler=gcs, use_mixed_res=use_mixed_res,
-                          mixed_res_config=mixed_res_config,
-                          fusion_technique=fusion_technique,
-                          fusion_alpha=fusion_alpha,
-                          degrade_gsd=degrade_gsd)
-            X, y = preprocess.populate(X, y, "labeled/no", use_nir=use_nir,
-                          end=True, gcs_handler=gcs,
+        for subdir, pattern, label, end in TASK_SOURCES[task]:
+            path = subdir if use_gcs else resolve_path(f"data/{subdir}")
+            X, y = preprocess.populate(X, y, path, use_nir=use_nir,
+                          end=end, gcs_handler=gcs,
                           use_mixed_res=use_mixed_res,
                           mixed_res_config=mixed_res_config,
                           fusion_technique=fusion_technique,
                           fusion_alpha=fusion_alpha,
-                          degrade_gsd=degrade_gsd)
+                          degrade_gsd=degrade_gsd,
+                          pattern=pattern, label=label)
 
-        except Exception as e:
+    except Exception as e:
+        if use_gcs:
             logger.error(f"Failed to load data from GCS: {str(e)}")
-            raise
-    else:
-        # Use local files with mixed resolution options
-        X, y = preprocess.populate(X, y, resolve_path("data/labeled/yes"), use_nir=use_nir,
-                      use_mixed_res=use_mixed_res,
-                      mixed_res_config=mixed_res_config,
-                      fusion_technique=fusion_technique,
-                      fusion_alpha=fusion_alpha,
-                      degrade_gsd=degrade_gsd)
-        X, y = preprocess.populate(X, y, resolve_path("data/labeled/no"), use_nir=use_nir,
-                      end=True, use_mixed_res=use_mixed_res,
-                      mixed_res_config=mixed_res_config,
-                      fusion_technique=fusion_technique,
-                      fusion_alpha=fusion_alpha,
-                      degrade_gsd=degrade_gsd)
+        raise
 
     # TODO: Use numpy instead here
     X = [X[i] for i in range(min(len(X), len(y)))]
@@ -174,7 +178,7 @@ def train(validate=True, epochs=50, use_nir=False, use_gcs=False,
                  tf.keras.metrics.Recall(class_id=1, name='recall')]
     )
 
-    checkpoint_path = "training_checkpoints/cp.weights.h5"
+    checkpoint_path = f"training_checkpoints/{task}/cp.weights.h5"
     checkpoint_dir = os.path.dirname(checkpoint_path)
 
     latest = tf.train.latest_checkpoint(checkpoint_dir)
@@ -232,7 +236,7 @@ def train(validate=True, epochs=50, use_nir=False, use_gcs=False,
         plt.savefig(plot_filename)
         # plt.close()
 
-        model_filename = os.path.join(exp_dir, f"model_{experiment_id}.onnx")
+        model_filename = os.path.join(exp_dir, f"{task}_model_{experiment_id}.onnx")
         export_to_onnx(model, model_filename)
 
         evaluator = ModelEvaluator(experiment_id, exp_dir)
@@ -243,6 +247,8 @@ def train(validate=True, epochs=50, use_nir=False, use_gcs=False,
         experiment_tracker.save_experiment_config(
             experiment_id,
             {
+                "task": task,
+                "class_names": [str(c) for c in label_encoder.classes_],
                 "use_nir": use_nir,
                 "dataset": {"total_samples": len(X), "train_samples": len(X_train), "test_samples": len(X_test), "source": "gcs" if use_gcs else "local"},
                 "mixed_resolution": {"enabled": use_mixed_res, **(mixed_res_config if use_mixed_res else {})},
@@ -319,7 +325,55 @@ def run_inference(onnx_model=None, data_target=None):
     if not data_target.any():
         logger.error("Please provide a test target")
         return
-    session = rt.InferenceSession(onnx_model, providers=rt.get_available_providers)
+    session = rt.InferenceSession(onnx_model, providers=rt.get_available_providers())
     input_name = session.get_inputs()[0].name
     prediction_onnx = session.run(None, {input_name: data_target.astype(np.float32)})[0]
     logger.info(f"Prediction: {prediction_onnx}")
+
+def predict(image_path, onnx_model, threshold=0.5):
+    """
+    Run an exported smoke model on one image or every image in a directory.
+
+    Preprocessing mirrors the smoke training path: resize to 224x224, then
+    per-channel z-score. Output index 1 is the positive ('smoke') class.
+
+    Args:
+        image_path (str): Image file or directory of images.
+        onnx_model (str): Path to the exported ONNX model.
+        threshold (float): Probability at or above which an image is flagged.
+
+    Returns:
+        list[dict]: One result per image with path, smoke_probability and smoke flag.
+    """
+    if os.path.isdir(image_path):
+        paths = sorted(
+            os.path.join(image_path, f) for f in os.listdir(image_path)
+            if f.lower().endswith(('.tif', '.tiff', '.png', '.jpg', '.jpeg'))
+        )
+    else:
+        paths = [image_path]
+
+    session = rt.InferenceSession(onnx_model, providers=rt.get_available_providers())
+    input_name = session.get_inputs()[0].name
+
+    results = []
+    for path in paths:
+        img = cv2.imread(path, cv2.IMREAD_UNCHANGED)
+        if img is None:
+            logger.warning(f"Could not read {path}, skipping...")
+            continue
+        img = cv2.resize(img, (224, 224), interpolation=cv2.INTER_AREA)
+        img = preprocess.dyn_zscore_normalize(img)
+        batch = np.expand_dims(img, axis=0).astype(np.float32)
+
+        probabilities = session.run(None, {input_name: batch})[0][0]
+        smoke_probability = float(probabilities[1])
+        result = {
+            "path": path,
+            "smoke_probability": smoke_probability,
+            "smoke": smoke_probability >= threshold,
+        }
+        logger.info(f"{path}: smoke={result['smoke']} (p={smoke_probability:.3f})")
+        results.append(result)
+
+    return results

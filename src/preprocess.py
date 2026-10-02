@@ -6,6 +6,7 @@ Features
 - Includes mixed resolution operations for resolution-agnostic training
 """
 import os
+import fnmatch
 import cv2
 import numpy as np
 import random
@@ -177,7 +178,7 @@ class FusionOutput(BaseModel):
 
 def populate(X_array, y_array, path, use_nir=False, end=False, gcs_handler=None,
              use_mixed_res=False, mixed_res_config=None, fusion_technique='enhanced_red',
-             fusion_alpha=0.5, degrade_gsd=False):
+             fusion_alpha=0.5, degrade_gsd=False, pattern=None, label=None):
     """Populates the input arrays with preprocessed images and labels.
 
     Args:
@@ -192,6 +193,8 @@ def populate(X_array, y_array, path, use_nir=False, end=False, gcs_handler=None,
         fusion_technique (str): RGB-NIR fusion technique: 'enhanced_red', 'hsv', or 'none'.
         fusion_alpha (float): Alpha value for enhanced_red fusion (default 0.5).
         degrade_gsd (bool): Whether to degrade imagery to CubeSat GSD (~85m from 10m).
+        pattern (str, optional): Glob matched against file basenames (e.g. 'smoke_*.tif'); non-matching files are skipped.
+        label (str, optional): Explicit label appended for every loaded image. Overrides the path-derived label and `end` padding.
 
     Returns:
         tuple: A tuple containing the updated X_array and y_array.
@@ -205,6 +208,8 @@ def populate(X_array, y_array, path, use_nir=False, end=False, gcs_handler=None,
             # Stream from GCS
             image_paths = gcs_handler.list_images(prefix=path)
             for image_path in image_paths:
+                if pattern and not fnmatch.fnmatch(os.path.basename(image_path), pattern):
+                    continue
                 image_bytes = gcs_handler.download_as_bytes(image_path)
                 if image_bytes is None:
                     logger.warning(f"Could not read {image_path}, skipping...")
@@ -248,11 +253,15 @@ def populate(X_array, y_array, path, use_nir=False, end=False, gcs_handler=None,
                     rgb = dyn_zscore_normalize(fused_result)
                     X_array.append(rgb)
 
-                if not end:
+                if label is not None:
+                    y_array.append(label)
+                elif not end:
                     y_array.append(image_path[0:1])
         else:
             # Local files
             for image in os.listdir(path):
+                if pattern and not fnmatch.fnmatch(image, pattern):
+                    continue
                 image_path = os.path.join(path, image)
 
                 rgb = cv2.imread(image_path, cv2.IMREAD_UNCHANGED)
@@ -296,10 +305,12 @@ def populate(X_array, y_array, path, use_nir=False, end=False, gcs_handler=None,
                     rgb = dyn_zscore_normalize(fused_result)
                     X_array.append(rgb)
 
-                if not end:
+                if label is not None:
+                    y_array.append(label)
+                elif not end:
                     y_array.append(image_path[0:1])
 
-        if end:
+        if end and label is None:
             # Ensure y_array has the same length as X_array
             while len(y_array) < len(X_array):
                 y_array.append("N")

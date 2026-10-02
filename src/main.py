@@ -38,13 +38,15 @@ if __name__ == "__main__":
         --time-range: Time range for the query in the format: FROM TO
                       (e.g., '2023-01-01T00:00:00Z 2023-01-03T23:59:59Z').
         --cloud-mask: Export OmniCloudMask models to ONNX and test on labeled data.
+        --task: Classifier to train with --run-model ('fire' or 'smoke').
+        --predict: Run an exported smoke ONNX model (--onnx-model) on an image or directory.
 
     Raises:
         SystemExit: If invalid arguments are provided.
     """
     parser = argparse.ArgumentParser(
         prog='Payload AI Software Suite',
-        description='Remote sensing mission core tools for wildfire image classification and data retrieval'
+        description='Remote sensing mission core tools for wildfire and smoke image classification and data retrieval'
     )
     parser.add_argument('--run-model', required=False, action='store_true', help="Run the model")
     parser.add_argument('--nasa-firms', required=False, action='store_true', help="Fetch data from NASA FIRMS API")
@@ -71,6 +73,10 @@ if __name__ == "__main__":
     parser.add_argument('--degrade-gsd', required=False, action='store_true', help="Degrade imagery to CubeSat GSD (~85m from 10m Sentinel-2)")
     parser.add_argument('--use-class-weights', required=False, action='store_true', help="Use balanced class weights during training")
     parser.add_argument("--compress-image", required=False, type=str, help="Path to the input .NEF image")
+    parser.add_argument('--task', required=False, type=str, default='fire', choices=['fire', 'smoke'], help="Classifier to train with --run-model")
+    parser.add_argument('--predict', required=False, type=str, metavar='PATH', help="Run a smoke ONNX model on an image or directory of images")
+    parser.add_argument('--onnx-model', required=False, type=str, help="Path to the ONNX model used by --predict")
+    parser.add_argument('--threshold', required=False, type=float, default=0.5, help="Smoke probability threshold for --predict")
 
     args = parser.parse_args()
     if args.run_model:
@@ -79,8 +85,15 @@ if __name__ == "__main__":
                                     fusion_technique=args.fusion_technique,
                                     fusion_alpha=args.fusion_alpha,
                                     degrade_gsd=args.degrade_gsd,
-                                    use_class_weights=args.use_class_weights)
+                                    use_class_weights=args.use_class_weights,
+                                    task=args.task)
         print(f"\nTraining complete! Experiment ID: {experiment_id}")
+    elif args.predict:
+        if not args.onnx_model:
+            parser.error("--predict requires --onnx-model")
+        results = model.predict(args.predict, args.onnx_model, threshold=args.threshold)
+        flagged = sum(r["smoke"] for r in results)
+        print(f"\nSmoke detected in {flagged}/{len(results)} image(s)")
     elif args.nasa_firms:
         nasa_firms_api()
     elif args.setup_auth:

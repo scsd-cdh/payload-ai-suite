@@ -52,6 +52,14 @@ The cloud mask functionality serves as a critical preprocessing step to assess c
 
 This preprocessing step significantly improves the reliability of wildfire detection by preventing false negatives caused by cloud occlusion.
 
+# Smoke Detection
+A separate binary classifier (smoke vs. no smoke) is trained alongside the wildfire model. It uses the same ResNet50 backbone and ONNX export.
+
+- **Data**: `smoke_*.tif` from `data/labeled/yes` (positive) and `haze_*.tif` from `data/labeled/no` (negative). These are RGB-only 256×256 images, so `--use-nir` is not supported, and `--degrade-gsd` should stay off because the images are already coarse.
+- **Train**: `uv run python src/main.py --run-model --task smoke --epochs 12` (add `--use-mixed-res` for augmentation). The run writes `experiments/<id>/smoke_model_<id>.onnx`. Checkpoints go to `training_checkpoints/smoke/`.
+- **Predict**: `uv run python src/main.py --predict <image-or-dir> --onnx-model experiments/<id>/smoke_model_<id>.onnx [--threshold 0.5]`
+- **Output**: softmax over `["no_smoke", "smoke"]`. Index 1 is the smoke probability. The class order is also recorded under `class_names` in the experiment's `config.json`.
+
 # File Structure
 The project is organized as follows:
 
