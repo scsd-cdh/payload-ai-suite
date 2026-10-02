@@ -323,3 +323,4 @@ def run_inference(onnx_model=None, data_target=None):
     input_name = session.get_inputs()[0].name
     prediction_onnx = session.run(None, {input_name: data_target.astype(np.float32)})[0]
     logger.info(f"Prediction: {prediction_onnx}")
+    return prediction_onnx
