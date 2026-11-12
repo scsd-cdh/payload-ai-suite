@@ -72,13 +72,13 @@ def train(validate=True, epochs=50, use_nir=False, use_gcs=False,
             gcs = GCSHandler()
 
             # Pass GCS handler and mixed_res options to populate function
-            X, y = preprocess.populate(X, y, "labeled/yes", use_nir=use_nir,
+            X, y = preprocess.populate(X, y, "labeled/yes", label="Y", use_nir=use_nir,
                           gcs_handler=gcs, use_mixed_res=use_mixed_res,
                           mixed_res_config=mixed_res_config,
                           fusion_technique=fusion_technique,
                           fusion_alpha=fusion_alpha,
                           degrade_gsd=degrade_gsd)
-            X, y = preprocess.populate(X, y, "labeled/no", use_nir=use_nir,
+            X, y = preprocess.populate(X, y, "labeled/no", label="N", use_nir=use_nir,
                           end=True, gcs_handler=gcs,
                           use_mixed_res=use_mixed_res,
                           mixed_res_config=mixed_res_config,
@@ -91,13 +91,15 @@ def train(validate=True, epochs=50, use_nir=False, use_gcs=False,
             raise
     else:
         # Use local files with mixed resolution options
-        X, y = preprocess.populate(X, y, resolve_path("data/labeled/yes"), use_nir=use_nir,
+        X, y = preprocess.populate(X, y, resolve_path("data/labeled/yes"),
+                      label="Y", use_nir=use_nir,
                       use_mixed_res=use_mixed_res,
                       mixed_res_config=mixed_res_config,
                       fusion_technique=fusion_technique,
                       fusion_alpha=fusion_alpha,
                       degrade_gsd=degrade_gsd)
-        X, y = preprocess.populate(X, y, resolve_path("data/labeled/no"), use_nir=use_nir,
+        X, y = preprocess.populate(X, y, resolve_path("data/labeled/no"),
+                      label="N", use_nir=use_nir,
                       end=True, use_mixed_res=use_mixed_res,
                       mixed_res_config=mixed_res_config,
                       fusion_technique=fusion_technique,
@@ -324,3 +326,43 @@ def run_inference(onnx_model=None, data_target=None):
     prediction_onnx = session.run(None, {input_name: data_target.astype(np.float32)})[0]
     logger.info(f"Prediction: {prediction_onnx}")
     return prediction_onnx
+
+# Class names must match the class order used during training.
+CLASS_NAMES = ["no_fire", "fire"]
+
+def decode_prediction(prediction):
+    probabilities = np.asarray(prediction, dtype=np.float32)
+
+    if probabilities.shape != (1, 2):
+        raise ValueError(
+            f"Expected prediction shape (1, 2), got {probabilities.shape}"
+        )
+
+    probabilities = probabilities[0]
+    class_index = int(np.argmax(probabilities))
+    confidence = float(probabilities[class_index])
+
+    return {
+        "class_index": class_index,
+        "class_name": CLASS_NAMES[class_index],
+        "confidence": confidence,
+        "probabilities": probabilities.tolist()
+    }
+
+
+def detect_fire(probabilities, threshold=0.70):
+    if not 0.0 <= threshold <= 1.0:
+        raise ValueError("Threshold must be between 0 and 1")
+
+    probabilities = np.asarray(probabilities, dtype=np.float32)
+
+    if probabilities.shape == (1, 2):
+        probabilities = probabilities[0]
+
+    if probabilities.shape != (2,):
+        raise ValueError("Expected two class probabilities")
+
+    fire_probability = probabilities[1]
+
+    # Compare using the same precision to avoid rounding issues
+    return bool(fire_probability >= np.float32(threshold))

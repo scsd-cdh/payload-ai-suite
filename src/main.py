@@ -2,7 +2,18 @@
 """
 import argparse
 import logging
-import model
+
+import sys
+from pathlib import Path
+
+# Allow Python to find the ground package at the project root.
+PROJECT_ROOT = Path(__file__).resolve().parent.parent
+
+if str(PROJECT_ROOT) not in sys.path:
+    sys.path.insert(0, str(PROJECT_ROOT))
+
+from ground.training import model_train as model
+
 import cloud as cloud
 from fetch import (
     nasa_firms_api,

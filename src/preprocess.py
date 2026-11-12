@@ -177,7 +177,7 @@ class FusionOutput(BaseModel):
 
 def populate(X_array, y_array, path, use_nir=False, end=False, gcs_handler=None,
              use_mixed_res=False, mixed_res_config=None, fusion_technique='enhanced_red',
-             fusion_alpha=0.5, degrade_gsd=False):
+             fusion_alpha=0.5, degrade_gsd=False ,fourth_channel_is_nir=False,label=None):
     """Populates the input arrays with preprocessed images and labels.
 
     Args:
@@ -196,6 +196,13 @@ def populate(X_array, y_array, path, use_nir=False, end=False, gcs_handler=None,
     Returns:
         tuple: A tuple containing the updated X_array and y_array.
     """
+
+    # Require an explicit label for each dataset
+    if label not in ("Y", "N"):
+        raise ValueError(
+            "A valid label must be provided: 'Y' for fire or 'N' for no fire"
+        )
+
     # Default configuration for mixed resolution operations
     if use_mixed_res and mixed_res_config is None:
         mixed_res_config = DEFAULT_MIXED_RES_CONFIG
@@ -226,14 +233,25 @@ def populate(X_array, y_array, path, use_nir=False, end=False, gcs_handler=None,
                 rgb = cv2.resize(rgb, (224, 224), interpolation=cv2.INTER_AREA)
 
                 if use_nir:
-                    nir = cv2.cvtColor(rgb, cv2.COLOR_BGR2GRAY)
-                    # Shape (224, 224, 1)
-                    nir = np.expand_dims(nir, axis=-1)
-                    # Shape (224, 224, 4)
-                    rgb_nir = np.concatenate((rgb, nir), axis=-1)
-                    logger.debug(f"NIR processing - RGB shape: {rgb.shape}, NIR shape: {nir.shape}, Combined: {rgb_nir.shape}")
+                    # NIR must come from a real fourth image band.
+                    if rgb.ndim != 3 or rgb.shape[2] != 4:
+                        raise ValueError(
+                            f"NIR requested, but {image_path} "
+                            "does not contain exactly four channels"
+                        )
+
+                    if not fourth_channel_is_nir:
+                        raise ValueError(
+                            "The fourth channel has not been confirmed as NIR"
+                        )
+
+                    # OpenCV supplies the first three channels in BGR order.
+                    # The fourth channel is used only after confirming it is NIR.
+                    rgb_nir = rgb[:, :, :4]
+
                     rgb_nir = dyn_zscore_normalize(rgb_nir)
                     X_array.append(rgb_nir)
+
                 else:
                     try:
                         fused_result = rgb_nir_fusion(
@@ -248,8 +266,7 @@ def populate(X_array, y_array, path, use_nir=False, end=False, gcs_handler=None,
                     rgb = dyn_zscore_normalize(fused_result)
                     X_array.append(rgb)
 
-                if not end:
-                    y_array.append(image_path[0:1])
+                y_array.append(label)
         else:
             # Local files
             for image in os.listdir(path):
@@ -271,38 +288,57 @@ def populate(X_array, y_array, path, use_nir=False, end=False, gcs_handler=None,
                 # AFTER augmentation, resize to fixed size for the model
                 rgb = cv2.resize(rgb, (224, 224), interpolation=cv2.INTER_AREA)
 
+
                 if use_nir:
-                    nir = cv2.cvtColor(rgb, cv2.COLOR_BGR2GRAY)
-                    # Shape (224, 224, 1)
-                    nir = np.expand_dims(nir, axis=-1)
-                    # Shape (224, 224, 4)
-                    rgb_nir = np.concatenate((rgb, nir), axis=-1)
-                    logger.debug(f"NIR processing - RGB shape: {rgb.shape}, NIR shape: {nir.shape}, Combined: {rgb_nir.shape}")
+                    # NIR must come from a real fourth image band.
+                    if rgb.ndim != 3 or rgb.shape[2] != 4:
+                        raise ValueError(
+                            f"NIR requested, but {image_path} "
+                            "does not contain exactly four channels"
+                        )
+
+                    if not fourth_channel_is_nir:
+                        raise ValueError(
+                            "The fourth channel has not been confirmed as NIR"
+                        )
+
+                    # Preserve the confirmed NIR channel.
+                    rgb_nir = rgb[:, :, :4]
                     rgb_nir = dyn_zscore_normalize(rgb_nir)
                     X_array.append(rgb_nir)
+
+
                 else:
-                    # RGB NIR fusion algorthm still relevant if we have 4 channels
-                    # the `use_nir` flag is soely for the AI model to take in a 4 channel input tensor
-                    try:
-                        fused_result = rgb_nir_fusion(
-                            rgb,
-                            technique=fusion_technique,
-                            alpha=fusion_alpha
+                    if rgb.ndim != 3 or rgb.shape[2] not in (3, 4):
+                        raise ValueError(
+                            f"Invalid channel count for {image_path}"
                         )
-                    except Exception as e:
-                        logger.warning(f"{e}: issue with the rgb nir fusion technique. Skipping for {image_path}")
+
+                    if rgb.shape[2] == 4:
+                        if fusion_technique == "none":
+                            fused_result = rgb[:, :, :3]
+                        else:
+                            if not fourth_channel_is_nir:
+                                raise ValueError(
+                                    "Fourth channel must be confirmed as NIR"
+                                )
+
+                            fused_result = rgb_nir_fusion(
+                                rgb,
+                                technique=fusion_technique,
+                                alpha=fusion_alpha
+                            )
+                    else:
+                        # Normal 3-channel image: no NIR fusion needed
                         fused_result = rgb
-                    # Normalization still applied after fallback
+
                     rgb = dyn_zscore_normalize(fused_result)
                     X_array.append(rgb)
 
-                if not end:
-                    y_array.append(image_path[0:1])
+                y_array.append(label)
 
-        if end:
-            # Ensure y_array has the same length as X_array
-            while len(y_array) < len(X_array):
-                y_array.append("N")
+
+
     except cv2.error as e:
         logger.error(f"CV2 error in preprocess: {e}")
         raise e
@@ -466,3 +502,85 @@ def rgb_nir_fusion(image_data: np.ndarray[Any, np.dtype[np.integer[Any] | np.flo
     else:
         logger.warning(f"Unknown fusion technique '{technique}', returning RGB only")
         return rgb
+
+
+def preprocess_for_inference(
+    image_path,
+    use_nir=False,
+    fusion_technique="enhanced_red",
+    fusion_alpha=0.5,
+    fourth_channel_is_nir=False
+):
+    """
+    Preprocess a single image for ONNX inference.
+
+    Returns:
+        float32 tensor with shape (1, 224, 224, 3)
+        or (1, 224, 224, 4) when use_nir=True.
+    """
+
+    # 1. Load the image, preserving its original channels
+    image = cv2.imread(str(image_path), cv2.IMREAD_UNCHANGED)
+
+    if image is None:
+        raise ValueError(f"Could not load image: {image_path}")
+
+    # 2. Validate channel count
+    if image.ndim != 3 or image.shape[2] not in (3, 4):
+        raise ValueError(
+            f"Expected a 3- or 4-channel image, got {image.shape}"
+        )
+
+    if use_nir and image.shape[2] != 4:
+        raise ValueError(
+            "NIR requested, but image does not contain a fourth channel"
+        )
+
+    if fusion_technique not in ("enhanced_red", "hsv", "none"):
+        raise ValueError("Invalid fusion technique")
+
+    if not 0.0 <= fusion_alpha <= 1.0:
+        raise ValueError("fusion_alpha must be between 0 and 1")
+
+    # The fourth channel might be alpha, not actual NIR.
+    needs_nir = use_nir or (
+        image.shape[2] == 4 and fusion_technique != "none"
+    )
+
+    if image.shape[2] == 4 and needs_nir and not fourth_channel_is_nir:
+        raise ValueError(
+            "Confirm that the fourth channel contains actual NIR data "
+            "before enabling NIR processing"
+        )
+
+    # 3. Resize to match the existing training pipeline
+    image = cv2.resize(
+        image, (224, 224), interpolation=cv2.INTER_AREA
+    )
+
+    # 4. Prepare the model channels
+    if use_nir:
+        # Preserve the fourth band as NIR.
+        processed = image
+    elif image.shape[2] == 4:
+        if fusion_technique == "none":
+            processed = image[:, :, :3]
+        else:
+            processed = rgb_nir_fusion(
+                image,
+                technique=fusion_technique,
+                alpha=fusion_alpha
+            )
+    else:
+        processed = image
+
+    # 5. Normalize exactly as the current training code does
+    normalized = dyn_zscore_normalize(processed)
+
+    # 6. Add batch dimension and convert to float32
+    tensor = np.ascontiguousarray(
+        normalized[np.newaxis, ...],
+        dtype=np.float32
+    )
+
+    return tensor
