@@ -3,7 +3,7 @@ Collection of software tools for multispectral image analysis and model testing.
 
 # Features
 - Cross-reference FIRMS fire event/EoNet and query via Copernicus's process API.
-- Run ResNet50 model on labeled (fire/no fire) data.
+- Run a ResNet50 model that classifies labeled data as fire, smoke or neither.
 - Experiment tracking with automatic JSON config/results output
 - CubeSat GSD simulation (10m Sentinel-2 → 85m degradation)
 - Preprocess RGB-NIR algorithm with advanced fusion techniques
@@ -52,13 +52,17 @@ The cloud mask functionality serves as a critical preprocessing step to assess c
 
 This preprocessing step significantly improves the reliability of wildfire detection by preventing false negatives caused by cloud occlusion.
 
-# Smoke Detection
-A separate binary classifier (smoke vs. no smoke) is trained alongside the wildfire model. It uses the same ResNet50 backbone and ONNX export.
+# Fire / Smoke / Neither Classification
+A single ResNet50 model classifies each image as **fire**, **smoke** or **neither** (3-class softmax), instead of separate binary classifiers.
 
-- **Data**: `smoke_*.tif` from `data/labeled/yes` (positive) and `haze_*.tif` from `data/labeled/no` (negative). These are RGB-only 256×256 images, so `--use-nir` is not supported, and `--degrade-gsd` should stay off because the images are already coarse.
-- **Train**: `uv run python src/main.py --run-model --task smoke --epochs 12` (add `--use-mixed-res` for augmentation). The run writes `experiments/<id>/smoke_model_<id>.onnx`. Checkpoints go to `training_checkpoints/smoke/`.
-- **Predict**: `uv run python src/main.py --predict <image-or-dir> --onnx-model experiments/<id>/smoke_model_<id>.onnx [--threshold 0.5]`
-- **Output**: softmax over `["no_smoke", "smoke"]`. Index 1 is the smoke probability. The class order is also recorded under `class_names` in the experiment's `config.json`.
+- **Data**:
+  - `fire`: files in `data/labeled/yes` except `smoke_*` and `haze_*`.
+  - `smoke`: `smoke_*` files in `data/labeled/yes`.
+  - `neither`: everything in `data/labeled/no`, including the `haze_*` images.
+  - Filename matching ignores case. Training stops with an error if any class has fewer than 2 images.
+- **Train**: `uv run python src/main.py --run-model --epochs 12`. The run writes `experiments/<id>/model_<id>.onnx`, and checkpoints go to `training_checkpoints/multiclass/`. The smoke and haze images are RGB-only and already coarse, so `--degrade-gsd` also degrades them.
+- **Predict**: `uv run python src/main.py --predict <image-or-dir> --onnx-model experiments/<id>/model_<id>.onnx`. Preprocessing is the same function used in training. Fusion settings and class names are read from the experiment's `config.json` when it sits next to the model.
+- **Output**: softmax over `["fire", "smoke", "neither"]`, in that index order (also recorded as `class_names` in `config.json`). The predicted class is the highest probability.
 
 # File Structure
 The project is organized as follows:
@@ -67,7 +71,7 @@ The project is organized as follows:
 payload-ai-suite/
 ├── src/                    # Source code directory
 │   ├── main.py             # CLI entry point for running tools and workflows.
-│   ├── model.py            # VGG-based wildfire classification model implementation.
+│   ├── model.py            # ResNet50 fire/smoke/neither classification model.
 │   ├── fetch.py            # Core utilities for data fetching (NASA FIRMS, Copernicus, EONET).
 │   ├── preprocess.py       # Preprocessing utilities for input data.
 │   ├── postprocess.py      # Image compression utilities (AVIF, CCDS formats).
