@@ -420,7 +420,12 @@ def rgb_nir_fusion(image_data: np.ndarray[Any, np.dtype[np.integer[Any] | np.flo
 
     3. 'none': Return RGB channels only (no fusion)
     """
-    logger.info(f"RGB-NIR fusion called with shape: {image_data.shape}")
+    logger.debug(f"RGB-NIR fusion called with shape: {image_data.shape}")
+
+    # RGB-only images (e.g. the smoke/haze dataset) have no NIR band to fuse
+    if image_data.ndim == 3 and image_data.shape[2] == 3:
+        logger.debug("Image has no NIR channel, skipping fusion")
+        return image_data
 
     # Validate input
     try:
