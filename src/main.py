@@ -75,6 +75,8 @@ if __name__ == "__main__":
     parser.add_argument('--degrade-gsd', required=False, action='store_true', help="Degrade imagery to CubeSat GSD (~85m from 10m Sentinel-2)")
     parser.add_argument('--use-class-weights', required=False, action='store_true', help="Use balanced class weights during training")
     parser.add_argument('--seed', required=False, type=int, default=42, help="Random seed for training, so runs are repeatable (default: 42)")
+    parser.add_argument('--fine-tune', required=False, action='store_true', help="After training the head, also fine-tune the last ResNet50 block (conv5)")
+    parser.add_argument('--fine-tune-epochs', required=False, type=int, default=10, help="Maximum epochs for the --fine-tune phase (default: 10)")
     parser.add_argument("--compress-image", required=False, type=str, help="Path to the input .NEF image")
     parser.add_argument('--predict', required=False, type=str, metavar='PATH', help="Classify an image or directory of images as fire/smoke/neither")
     parser.add_argument('--onnx-model', required=False, type=str, help="Path to the ONNX model used by --predict")
@@ -87,7 +89,9 @@ if __name__ == "__main__":
                                     fusion_alpha=args.fusion_alpha,
                                     degrade_gsd=args.degrade_gsd,
                                     use_class_weights=args.use_class_weights,
-                                    seed=args.seed)
+                                    seed=args.seed,
+                                    fine_tune=args.fine_tune,
+                                    fine_tune_epochs=args.fine_tune_epochs)
         print(f"\nTraining complete! Experiment ID: {experiment_id}")
     elif args.predict:
         if not args.onnx_model:

@@ -48,9 +48,24 @@ DATA_SOURCES = [
     ("labeled/no", None, None, "neither"),
 ]
 
+# Learning rates: the head trains at HEAD_LEARNING_RATE; fine-tuning the pretrained
+# block uses a 10x smaller rate so the ImageNet features are adjusted, not overwritten.
+HEAD_LEARNING_RATE = 1e-4
+FINE_TUNE_LEARNING_RATE = 1e-5
+# Last ResNet50 block; its layers are named conv5_block1_..., conv5_block2_..., etc.
+FINE_TUNE_BLOCK = "conv5_"
+
+# Data split fractions (train gets the rest, 70%). The test set is held out and only
+# used for the final evaluation; validation drives early stopping and fine-tuning.
+VAL_SIZE = 0.15
+TEST_SIZE = 0.15
+# A stratified 3-way split needs a few images of every class in each part
+MIN_IMAGES_PER_CLASS = 5
+
 def train(validate=True, epochs=50, use_nir=False, use_gcs=False,
           use_mixed_res=False, mixed_res_config=None, fusion_technique='enhanced_red',
-          fusion_alpha=0.5, degrade_gsd=False, use_class_weights=False, seed=42):
+          fusion_alpha=0.5, degrade_gsd=False, use_class_weights=False, seed=42,
+          fine_tune=False, fine_tune_epochs=10):
     """
     Train a CNN ResNet50 model to classify images as fire, smoke or neither.
 
@@ -68,6 +83,10 @@ def train(validate=True, epochs=50, use_nir=False, use_gcs=False,
         seed (int): Seed for training randomness (weight init, shuffling, augmentation),
             so the same settings reproduce the same model. The train/test split
             always uses a fixed seed so every run is tested on the same images.
+        fine_tune (bool): After training the head, unfreeze the last ResNet50 block
+            (conv5) and keep training at a lower learning rate. The fine-tuned weights
+            are only kept if they improve validation loss.
+        fine_tune_epochs (int): Maximum number of epochs for the fine-tuning phase.
 
     Returns:
         str: Experiment ID for this training run
@@ -112,17 +131,26 @@ def train(validate=True, epochs=50, use_nir=False, use_gcs=False,
     num_classes = len(CLASS_NAMES)
     class_counts = {name: y.count(name) for name in CLASS_NAMES}
     logger.info(f"Images per class: {class_counts}")
-    missing = [name for name, count in class_counts.items() if count < 2]
+    missing = [name for name, count in class_counts.items() if count < MIN_IMAGES_PER_CLASS]
     if missing:
         raise ValueError(f"Not enough training images for class(es) {missing} "
-                         f"(need at least 2 each, got {class_counts})")
+                         f"(need at least {MIN_IMAGES_PER_CLASS} each to split into "
+                         f"train/validation/test, got {class_counts})")
 
     # Explicit label -> index mapping so output order always matches CLASS_NAMES
     y = np.array([CLASS_NAMES.index(label) for label in y])
     X = np.array(X)
 
-    X_train, X_test, y_train, y_test, _, sources_test = train_test_split(
-        X, y, sources, test_size=0.33, random_state=42, stratify=y)
+    # Three-way stratified split with a fixed seed (same images every run):
+    #   train      - fits the model
+    #   validation - early stopping, learning-rate drops and the keep/revert
+    #                fine-tuning decision
+    #   test       - only touched once at the end, so its score is unbiased
+    X_rest, X_test, y_rest, y_test, sources_rest, sources_test = train_test_split(
+        X, y, sources, test_size=TEST_SIZE, random_state=42, stratify=y)
+    X_train, X_val, y_train, y_val = train_test_split(
+        X_rest, y_rest, test_size=VAL_SIZE / (1 - TEST_SIZE), random_state=42, stratify=y_rest)
+    logger.info(f"Split: {len(X_train)} train / {len(X_val)} validation / {len(X_test)} test")
 
     # Compute balanced class weights
     class_weights_array = compute_class_weight(
@@ -132,6 +160,7 @@ def train(validate=True, epochs=50, use_nir=False, use_gcs=False,
     )
 
     y_train = tf.keras.utils.to_categorical(y_train, num_classes=num_classes)
+    y_val = tf.keras.utils.to_categorical(y_val, num_classes=num_classes)
     y_test = tf.keras.utils.to_categorical(y_test, num_classes=num_classes)
 
     class_weights = {i: weight for i, weight in enumerate(class_weights_array)}
@@ -148,8 +177,8 @@ def train(validate=True, epochs=50, use_nir=False, use_gcs=False,
         input_shape=input_shape
     )
 
-    # Here we freeze the last 4 layers
-    # Layers are set to trainable as True by default
+    # Freeze the whole pretrained backbone so only the new head is trained first.
+    # With fine_tune=True the last block is unfrozen afterwards (see below).
     for layer in resnet50.layers:
         layer.trainable = False
 
@@ -170,16 +199,21 @@ def train(validate=True, epochs=50, use_nir=False, use_gcs=False,
     model = keras.models.Model(inputs=resnet50.input, outputs=head)
 
     model.summary(print_fn=logger.info)
-    model.compile(
-        optimizer=tf.keras.optimizers.Adam(learning_rate=1e-4),
-        loss='categorical_crossentropy',
-        metrics=['accuracy'] + [
-            metric(class_id=i, name=f"{metric_name}_{name}")
-            for i, name in enumerate(CLASS_NAMES) if name != "neither"
-            for metric, metric_name in ((tf.keras.metrics.Precision, "precision"),
-                                        (tf.keras.metrics.Recall, "recall"))
-        ]
-    )
+
+    def compile_model(learning_rate):
+        # Called again for fine-tuning: Keras needs a recompile after trainable changes
+        model.compile(
+            optimizer=tf.keras.optimizers.Adam(learning_rate=learning_rate),
+            loss='categorical_crossentropy',
+            metrics=['accuracy'] + [
+                metric(class_id=i, name=f"{metric_name}_{name}")
+                for i, name in enumerate(CLASS_NAMES) if name != "neither"
+                for metric, metric_name in ((tf.keras.metrics.Precision, "precision"),
+                                            (tf.keras.metrics.Recall, "recall"))
+            ]
+        )
+
+    compile_model(HEAD_LEARNING_RATE)
 
     checkpoint_path = "training_checkpoints/multiclass/cp.weights.h5"
     checkpoint_dir = os.path.dirname(checkpoint_path)
@@ -194,34 +228,90 @@ def train(validate=True, epochs=50, use_nir=False, use_gcs=False,
                                                      save_weights_only=True,
                                                      verbose=1)
 
-    early_stopping = tf.keras.callbacks.EarlyStopping(
-        monitor='val_loss',
-        patience=10,
-        restore_best_weights=True,
-        verbose=1
-    )
+    def make_callbacks():
+        # Fresh instances per phase: these callbacks keep internal state
+        early_stopping = tf.keras.callbacks.EarlyStopping(
+            monitor='val_loss',
+            patience=10,
+            restore_best_weights=True,
+            verbose=1
+        )
+        reduce_lr = tf.keras.callbacks.ReduceLROnPlateau(
+            monitor='val_loss',
+            factor=0.5,
+            patience=3,
+            min_lr=1e-7,
+            verbose=1
+        )
+        return [cp_callback, early_stopping, reduce_lr]
 
-    reduce_lr = tf.keras.callbacks.ReduceLROnPlateau(
-        monitor='val_loss',
-        factor=0.5,
-        patience=3,
-        min_lr=1e-7,
-        verbose=1
-    )
-
+    # Phase 1: train the new head on top of the frozen backbone
     history = model.fit(X_train, y_train,
                         epochs=epochs,
-                        validation_data=(X_test, y_test),
+                        validation_data=(X_val, y_val),
                         verbose=1,
                         initial_epoch=0,
                         shuffle=True,
                         class_weight=class_weights if use_class_weights else None,
-                        callbacks=[cp_callback, early_stopping, reduce_lr])
+                        callbacks=make_callbacks())
 
     accuracy = history.history['accuracy']
     val_accuracy = history.history['val_accuracy']
     loss = history.history['loss']
     val_loss = history.history['val_loss']
+    head_epochs = len(accuracy)
+
+    fine_tune_info = {"enabled": fine_tune}
+    if fine_tune:
+        # Phase 2: unfreeze the last ResNet block and train it gently.
+        # BatchNorm layers stay frozen so their statistics aren't wrecked by small batches.
+        best_head_val_loss = min(val_loss)
+        head_weights = model.get_weights()  # best phase-1 weights (restored by early stopping)
+
+        unfrozen = 0
+        for layer in resnet50.layers:
+            if (layer.name.startswith(FINE_TUNE_BLOCK)
+                    and not isinstance(layer, keras.layers.BatchNormalization)):
+                layer.trainable = True
+                unfrozen += 1
+        logger.info(f"Fine-tuning: unfroze {unfrozen} layers in {FINE_TUNE_BLOCK} "
+                    f"(lr={FINE_TUNE_LEARNING_RATE}, up to {fine_tune_epochs} epochs)")
+
+        compile_model(FINE_TUNE_LEARNING_RATE)
+        ft_history = model.fit(X_train, y_train,
+                               epochs=head_epochs + fine_tune_epochs,
+                               validation_data=(X_val, y_val),
+                               verbose=1,
+                               initial_epoch=head_epochs,
+                               shuffle=True,
+                               class_weight=class_weights if use_class_weights else None,
+                               callbacks=make_callbacks())
+
+        accuracy += ft_history.history['accuracy']
+        val_accuracy += ft_history.history['val_accuracy']
+        loss += ft_history.history['loss']
+        val_loss += ft_history.history['val_loss']
+
+        best_ft_val_loss = min(ft_history.history['val_loss'])
+        kept = best_ft_val_loss < best_head_val_loss
+        if kept:
+            logger.info(f"Fine-tuning improved val_loss {best_head_val_loss:.4f} -> "
+                        f"{best_ft_val_loss:.4f}; keeping fine-tuned weights")
+        else:
+            model.set_weights(head_weights)
+            logger.info(f"Fine-tuning did not improve val_loss ({best_ft_val_loss:.4f} vs "
+                        f"{best_head_val_loss:.4f}); reverted to the head-only weights")
+
+        fine_tune_info.update({
+            "block": FINE_TUNE_BLOCK,
+            "unfrozen_layers": unfrozen,
+            "learning_rate": FINE_TUNE_LEARNING_RATE,
+            "max_epochs": fine_tune_epochs,
+            "epochs_run": len(ft_history.history['val_loss']),
+            "best_head_val_loss": float(best_head_val_loss),
+            "best_fine_tune_val_loss": float(best_ft_val_loss),
+            "kept": kept,
+        })
 
     if validate:
         evaluation_results = model.evaluate(X_test, y_test)
@@ -231,6 +321,8 @@ def train(validate=True, epochs=50, use_nir=False, use_gcs=False,
         epochs_range = range(len(accuracy))
         plt.plot(epochs_range, accuracy, 'r', label='Training accuracy')
         plt.plot(epochs_range, val_accuracy, 'b', label='Validation accuracy')
+        if fine_tune:
+            plt.axvline(head_epochs - 0.5, color='gray', linestyle='--', label='Fine-tuning starts')
         plt.title('Training and validation accuracy')
         plt.legend(loc=0)
 
@@ -253,7 +345,7 @@ def train(validate=True, epochs=50, use_nir=False, use_gcs=False,
             {
                 "class_names": CLASS_NAMES,
                 "use_nir": use_nir,
-                "dataset": {"total_samples": len(X), "train_samples": len(X_train), "test_samples": len(X_test), "class_counts": class_counts, "source": "gcs" if use_gcs else "local"},
+                "dataset": {"total_samples": len(X), "train_samples": len(X_train), "val_samples": len(X_val), "test_samples": len(X_test), "class_counts": class_counts, "source": "gcs" if use_gcs else "local"},
                 "mixed_resolution": {"enabled": use_mixed_res, **(mixed_res_config if use_mixed_res else {})},
                 "rgb_nir_fusion": {"technique": fusion_technique, "alpha": fusion_alpha},
                 "gsd_degradation": degrade_gsd,
@@ -268,8 +360,10 @@ def train(validate=True, epochs=50, use_nir=False, use_gcs=False,
                 "epochs": len(accuracy),
                 "optimizer": model.optimizer.__class__.__name__.lower(),
                 "loss": model.loss,
-                "train_test_split": len(X_test) / len(X),
-                "seed": seed
+                "split": {"train": round(1 - VAL_SIZE - TEST_SIZE, 2), "val": VAL_SIZE, "test": TEST_SIZE},
+                "seed": seed,
+                "head_learning_rate": HEAD_LEARNING_RATE,
+                "fine_tune": fine_tune_info
             }
         )
 
