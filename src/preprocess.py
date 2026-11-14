@@ -6,6 +6,7 @@ Features
 - Includes mixed resolution operations for resolution-agnostic training
 """
 import os
+import re
 import fnmatch
 import cv2
 import numpy as np
@@ -176,6 +177,26 @@ class FusionOutput(BaseModel):
             raise ValueError(f"Output must have 3 channels (RGB), got {v[2]} channels")
         return v
 
+IMAGE_EXTENSIONS = ('.tif', '.tiff', '.png', '.jpg', '.jpeg')
+
+
+def is_image_file(filename):
+    """True for supported image files. Rejects metadata such as 'x.tif:Zone.Identifier'."""
+    return os.path.basename(filename).lower().endswith(IMAGE_EXTENSIONS)
+
+
+def image_group(filename):
+    """Group name from a filename prefix, e.g. 'smoke_12.tif' -> 'smoke', 'abc.tiff' -> 'other'.
+
+    Used to report results per kind of image (smoke, haze, cloud, ...).
+    """
+    name = os.path.basename(filename).lower()
+    if "_" not in name:
+        return "other"
+    match = re.match(r"[a-z]+", name)
+    return match.group(0) if match else "other"
+
+
 def matches_filters(filename, pattern=None, exclude=None):
     """Check a file's basename against an include glob and exclude globs (case-insensitive)."""
     name = os.path.basename(filename).lower()
@@ -231,7 +252,8 @@ def prepare_for_model(img: np.ndarray, use_nir: bool = False,
 
 def populate(X_array, y_array, path, label, use_nir=False, gcs_handler=None,
              use_mixed_res=False, mixed_res_config=None, fusion_technique='enhanced_red',
-             fusion_alpha=0.5, degrade_gsd=False, pattern=None, exclude=None):
+             fusion_alpha=0.5, degrade_gsd=False, pattern=None, exclude=None,
+             sources=None):
     """Populates the input arrays with preprocessed images and labels.
 
     Args:
@@ -248,6 +270,11 @@ def populate(X_array, y_array, path, label, use_nir=False, gcs_handler=None,
         degrade_gsd (bool): Whether to degrade imagery to CubeSat GSD (~85m from 10m).
         pattern (str, optional): Glob a file's basename must match (e.g. 'smoke_*'). Case-insensitive.
         exclude (list[str], optional): Globs; files whose basename matches any are skipped.
+        sources (list, optional): If given, the path of every loaded image is appended,
+            aligned with X_array/y_array.
+
+    Only files with an image extension (IMAGE_EXTENSIONS) are read; anything else,
+    such as Windows 'Zone.Identifier' metadata files, is skipped silently.
 
     Returns:
         tuple: A tuple containing the updated X_array and y_array.
@@ -262,8 +289,12 @@ def populate(X_array, y_array, path, label, use_nir=False, gcs_handler=None,
         image_paths = [os.path.join(path, f) for f in os.listdir(path)]
 
     loaded = 0
+    skipped = 0
     try:
         for image_path in image_paths:
+            if not is_image_file(image_path):
+                skipped += 1
+                continue
             if not matches_filters(image_path, pattern, exclude):
                 continue
 
@@ -289,12 +320,16 @@ def populate(X_array, y_array, path, label, use_nir=False, gcs_handler=None,
                                              fusion_alpha=fusion_alpha,
                                              source=image_path))
             y_array.append(label)
+            if sources is not None:
+                sources.append(image_path)
             loaded += 1
     except cv2.error as e:
         logger.error(f"CV2 error in preprocess: {e}")
         raise e
 
     logger.info(f"Loaded {loaded} '{label}' images from {path}")
+    if skipped:
+        logger.debug(f"Skipped {skipped} non-image files in {path}")
 
     return X_array, y_array
 

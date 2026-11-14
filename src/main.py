@@ -17,7 +17,10 @@ from postprocess import (
 )
 
 # Set up logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+# force=True: importing mlops can configure the root logger at WARNING level first
+# (it calls logging.warning when no Gemini key is set), which would hide all INFO logs.
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+                    force=True)
 logger = logging.getLogger(__name__)
 
 if __name__ == "__main__":
@@ -71,6 +74,7 @@ if __name__ == "__main__":
     parser.add_argument('--fusion-alpha', required=False, type=float, default=0.5, help="Alpha parameter for enhanced_red fusion (0-1)")
     parser.add_argument('--degrade-gsd', required=False, action='store_true', help="Degrade imagery to CubeSat GSD (~85m from 10m Sentinel-2)")
     parser.add_argument('--use-class-weights', required=False, action='store_true', help="Use balanced class weights during training")
+    parser.add_argument('--seed', required=False, type=int, default=42, help="Random seed for training, so runs are repeatable (default: 42)")
     parser.add_argument("--compress-image", required=False, type=str, help="Path to the input .NEF image")
     parser.add_argument('--predict', required=False, type=str, metavar='PATH', help="Classify an image or directory of images as fire/smoke/neither")
     parser.add_argument('--onnx-model', required=False, type=str, help="Path to the ONNX model used by --predict")
@@ -82,7 +86,8 @@ if __name__ == "__main__":
                                     fusion_technique=args.fusion_technique,
                                     fusion_alpha=args.fusion_alpha,
                                     degrade_gsd=args.degrade_gsd,
-                                    use_class_weights=args.use_class_weights)
+                                    use_class_weights=args.use_class_weights,
+                                    seed=args.seed)
         print(f"\nTraining complete! Experiment ID: {experiment_id}")
     elif args.predict:
         if not args.onnx_model:

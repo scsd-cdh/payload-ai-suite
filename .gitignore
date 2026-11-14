@@ -52,3 +52,6 @@ training_checkpoints
 
 # big image
 image.NEF
+
+# experiment outputs (config, results, plots)
+experiments/

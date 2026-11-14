@@ -50,7 +50,7 @@ DATA_SOURCES = [
 
 def train(validate=True, epochs=50, use_nir=False, use_gcs=False,
           use_mixed_res=False, mixed_res_config=None, fusion_technique='enhanced_red',
-          fusion_alpha=0.5, degrade_gsd=False, use_class_weights=False):
+          fusion_alpha=0.5, degrade_gsd=False, use_class_weights=False, seed=42):
     """
     Train a CNN ResNet50 model to classify images as fire, smoke or neither.
 
@@ -65,16 +65,24 @@ def train(validate=True, epochs=50, use_nir=False, use_gcs=False,
         fusion_alpha (float): Alpha parameter for enhanced_red fusion.
         degrade_gsd (bool): Whether to degrade imagery to CubeSat GSD (~85m from 10m).
         use_class_weights (bool): Whether to use balanced class weights during training.
+        seed (int): Seed for training randomness (weight init, shuffling, augmentation),
+            so the same settings reproduce the same model. The train/test split
+            always uses a fixed seed so every run is tested on the same images.
 
     Returns:
         str: Experiment ID for this training run
     """
     # Generate experiment ID
     experiment_id = experiment_tracker.generate_experiment_id()
-    logger.info(f"Starting training experiment: {experiment_id}")
+    logger.info(f"Starting training experiment: {experiment_id} (seed={seed})")
+
+    # Seeds Python, NumPy and TensorFlow; op determinism makes TF results repeatable
+    tf.keras.utils.set_random_seed(seed)
+    tf.config.experimental.enable_op_determinism()
 
     X = []
     y = []
+    sources = []  # file path of each image, used for the per-group report
 
     # Use default config if none provided
     if use_mixed_res and mixed_res_config is None:
@@ -93,7 +101,8 @@ def train(validate=True, epochs=50, use_nir=False, use_gcs=False,
                           fusion_technique=fusion_technique,
                           fusion_alpha=fusion_alpha,
                           degrade_gsd=degrade_gsd,
-                          pattern=pattern, exclude=exclude)
+                          pattern=pattern, exclude=exclude,
+                          sources=sources)
 
     except Exception as e:
         if use_gcs:
@@ -112,8 +121,8 @@ def train(validate=True, epochs=50, use_nir=False, use_gcs=False,
     y = np.array([CLASS_NAMES.index(label) for label in y])
     X = np.array(X)
 
-    X_train, X_test, y_train, y_test = train_test_split(
-        X, y, test_size=0.33, random_state=42, stratify=y)
+    X_train, X_test, y_train, y_test, _, sources_test = train_test_split(
+        X, y, sources, test_size=0.33, random_state=42, stratify=y)
 
     # Compute balanced class weights
     class_weights_array = compute_class_weight(
@@ -236,7 +245,8 @@ def train(validate=True, epochs=50, use_nir=False, use_gcs=False,
         evaluator = ModelEvaluator(experiment_id, exp_dir)
 
 
-        evaluation_metrics = evaluator.evaluate_and_save_all(X_test, y_test, model)
+        evaluation_metrics = evaluator.evaluate_and_save_all(
+            X_test, y_test, model, sources=sources_test, class_names=CLASS_NAMES)
 
         experiment_tracker.save_experiment_config(
             experiment_id,
@@ -258,7 +268,8 @@ def train(validate=True, epochs=50, use_nir=False, use_gcs=False,
                 "epochs": len(accuracy),
                 "optimizer": model.optimizer.__class__.__name__.lower(),
                 "loss": model.loss,
-                "train_test_split": len(X_test) / len(X)
+                "train_test_split": len(X_test) / len(X),
+                "seed": seed
             }
         )
 
@@ -354,7 +365,7 @@ def predict(image_path, onnx_model, fusion_technique='enhanced_red', fusion_alph
     if os.path.isdir(image_path):
         paths = sorted(
             os.path.join(image_path, f) for f in os.listdir(image_path)
-            if f.lower().endswith(('.tif', '.tiff', '.png', '.jpg', '.jpeg'))
+            if preprocess.is_image_file(f)
         )
     else:
         paths = [image_path]
