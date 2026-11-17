@@ -6,6 +6,8 @@ Features
 - Includes mixed resolution operations for resolution-agnostic training
 """
 import os
+import re
+import fnmatch
 import cv2
 import numpy as np
 import random
@@ -175,23 +177,104 @@ class FusionOutput(BaseModel):
             raise ValueError(f"Output must have 3 channels (RGB), got {v[2]} channels")
         return v
 
-def populate(X_array, y_array, path, use_nir=False, end=False, gcs_handler=None,
+IMAGE_EXTENSIONS = ('.tif', '.tiff', '.png', '.jpg', '.jpeg')
+
+
+def is_image_file(filename):
+    """True for supported image files. Rejects metadata such as 'x.tif:Zone.Identifier'."""
+    return os.path.basename(filename).lower().endswith(IMAGE_EXTENSIONS)
+
+
+def image_group(filename):
+    """Group name from a filename prefix, e.g. 'smoke_12.tif' -> 'smoke', 'abc.tiff' -> 'other'.
+
+    Used to report results per kind of image (smoke, haze, cloud, ...).
+    """
+    name = os.path.basename(filename).lower()
+    if "_" not in name:
+        return "other"
+    match = re.match(r"[a-z]+", name)
+    return match.group(0) if match else "other"
+
+
+def matches_filters(filename, pattern=None, exclude=None):
+    """Check a file's basename against an include glob and exclude globs (case-insensitive)."""
+    name = os.path.basename(filename).lower()
+    if pattern and not fnmatch.fnmatchcase(name, pattern.lower()):
+        return False
+    if exclude and any(fnmatch.fnmatchcase(name, p.lower()) for p in exclude):
+        return False
+    return True
+
+
+def prepare_for_model(img: np.ndarray, use_nir: bool = False,
+                      fusion_technique: str = 'enhanced_red',
+                      fusion_alpha: float = 0.5, source: str = "") -> np.ndarray:
+    """Turn a decoded image into a normalized 224x224 model input.
+
+    Shared by training (after augmentation) and inference so both see
+    identical preprocessing.
+
+    Args:
+        img: Decoded image (HxW, HxWx3 or HxWx4).
+        use_nir: Build a 4-channel RGB+NIR tensor instead of fusing to 3 channels.
+        fusion_technique: RGB-NIR fusion technique: 'enhanced_red', 'hsv', or 'none'.
+        fusion_alpha: Alpha value for enhanced_red fusion.
+        source: Image path, used only in log messages.
+
+    Returns:
+        np.ndarray: float32 array of shape (224, 224, 3), or (224, 224, 4) with use_nir.
+    """
+    if img.ndim == 2:
+        img = cv2.cvtColor(img, cv2.COLOR_GRAY2BGR)
+
+    img = cv2.resize(img, (224, 224), interpolation=cv2.INTER_AREA)
+
+    if use_nir:
+        if img.shape[2] == 3:
+            # No NIR band (RGB-only image): approximate it with the grayscale intensity
+            nir = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+            # Shape (224, 224, 1)
+            nir = np.expand_dims(nir, axis=-1)
+            # Shape (224, 224, 4)
+            img = np.concatenate((img, nir), axis=-1)
+        # 4-channel images already carry NIR in the alpha channel
+    else:
+        # RGB NIR fusion algorithm still relevant if we have 4 channels;
+        # the `use_nir` flag is solely for the AI model to take in a 4 channel input tensor
+        try:
+            img = rgb_nir_fusion(img, technique=fusion_technique, alpha=fusion_alpha)
+        except Exception as e:
+            logger.warning(f"{e}: issue with the rgb nir fusion technique. Skipping for {source}")
+
+    return dyn_zscore_normalize(img)
+
+
+def populate(X_array, y_array, path, label, use_nir=False, gcs_handler=None,
              use_mixed_res=False, mixed_res_config=None, fusion_technique='enhanced_red',
-             fusion_alpha=0.5, degrade_gsd=False):
+             fusion_alpha=0.5, degrade_gsd=False, pattern=None, exclude=None,
+             sources=None):
     """Populates the input arrays with preprocessed images and labels.
 
     Args:
         X_array (list): List to store the preprocessed images.
         y_array (list): List to store the labels corresponding to the images.
-        path (str): Path to the directory containing image files.
+        path (str): Local directory, or GCS prefix when gcs_handler is given.
+        label (str): Class label appended for every loaded image.
         use_nir (bool): Whether to include the NIR channel.
-        end (bool, optional): Flag to indicate whether to append default labels. Defaults to False.
         gcs_handler: Handler for Google Cloud Storage.
         use_mixed_res (bool): Whether to apply mixed resolution operations.
         mixed_res_config (dict): Configuration for mixed resolution operations.
         fusion_technique (str): RGB-NIR fusion technique: 'enhanced_red', 'hsv', or 'none'.
         fusion_alpha (float): Alpha value for enhanced_red fusion (default 0.5).
         degrade_gsd (bool): Whether to degrade imagery to CubeSat GSD (~85m from 10m).
+        pattern (str, optional): Glob a file's basename must match (e.g. 'smoke_*'). Case-insensitive.
+        exclude (list[str], optional): Globs; files whose basename matches any are skipped.
+        sources (list, optional): If given, the path of every loaded image is appended,
+            aligned with X_array/y_array.
+
+    Only files with an image extension (IMAGE_EXTENSIONS) are read; anything else,
+    such as Windows 'Zone.Identifier' metadata files, is skipped silently.
 
     Returns:
         tuple: A tuple containing the updated X_array and y_array.
@@ -200,117 +283,53 @@ def populate(X_array, y_array, path, use_nir=False, end=False, gcs_handler=None,
     if use_mixed_res and mixed_res_config is None:
         mixed_res_config = DEFAULT_MIXED_RES_CONFIG
 
+    if gcs_handler:
+        image_paths = gcs_handler.list_images(prefix=path)
+    else:
+        image_paths = [os.path.join(path, f) for f in os.listdir(path)]
+
+    loaded = 0
+    skipped = 0
     try:
-        if gcs_handler:
-            # Stream from GCS
-            image_paths = gcs_handler.list_images(prefix=path)
-            for image_path in image_paths:
+        for image_path in image_paths:
+            if not is_image_file(image_path):
+                skipped += 1
+                continue
+            if not matches_filters(image_path, pattern, exclude):
+                continue
+
+            if gcs_handler:
                 image_bytes = gcs_handler.download_as_bytes(image_path)
-                if image_bytes is None:
-                    logger.warning(f"Could not read {image_path}, skipping...")
-                    continue
-                rgb = stream_image_from_gcs(image_bytes)
-                if rgb is None:
-                    logger.warning(f"Could not decode {image_path}, skipping...")
-                    continue
+                img = stream_image_from_gcs(image_bytes) if image_bytes is not None else None
+            else:
+                img = cv2.imread(image_path, cv2.IMREAD_UNCHANGED)
+            if img is None:
+                logger.warning(f"Could not read {image_path}, skipping...")
+                continue
 
-                # Apply GSD degradation if requested (simulates CubeSat resolution)
-                if degrade_gsd:
-                    rgb = degrade_to_cubesat_gsd(rgb)
+            # Apply GSD degradation if requested (simulates CubeSat resolution)
+            if degrade_gsd:
+                img = degrade_to_cubesat_gsd(img)
 
-                # IMPORTANT: Apply mixed resolution operations BEFORE resizing to fixed size
-                if use_mixed_res:
-                    rgb = apply_mixed_resolution_ops([rgb], **mixed_res_config)[0]
+            # IMPORTANT: Apply mixed resolution operations BEFORE resizing to fixed size
+            if use_mixed_res:
+                img = apply_mixed_resolution_ops([img], **mixed_res_config)[0]
 
-                # AFTER augmentation, resize to fixed size for the model
-                rgb = cv2.resize(rgb, (224, 224), interpolation=cv2.INTER_AREA)
-
-                if use_nir:
-                    nir = cv2.cvtColor(rgb, cv2.COLOR_BGR2GRAY)
-                    # Shape (224, 224, 1)
-                    nir = np.expand_dims(nir, axis=-1)
-                    # Shape (224, 224, 4)
-                    rgb_nir = np.concatenate((rgb, nir), axis=-1)
-                    logger.debug(f"NIR processing - RGB shape: {rgb.shape}, NIR shape: {nir.shape}, Combined: {rgb_nir.shape}")
-                    rgb_nir = dyn_zscore_normalize(rgb_nir)
-                    X_array.append(rgb_nir)
-                else:
-                    try:
-                        fused_result = rgb_nir_fusion(
-                            rgb,
-                            technique=fusion_technique,
-                            alpha=fusion_alpha
-                        )
-                    except Exception as e:
-                        logger.warning(f"{e}: issue with rgb nir fusion technique, skipping for {image_path}")
-                        fused_result = rgb
-                    # Normalization still applied after fallback
-                    rgb = dyn_zscore_normalize(fused_result)
-                    X_array.append(rgb)
-
-                if not end:
-                    y_array.append(image_path[0:1])
-        else:
-            # Local files
-            for image in os.listdir(path):
-                image_path = os.path.join(path, image)
-
-                rgb = cv2.imread(image_path, cv2.IMREAD_UNCHANGED)
-                if rgb is None:
-                    logger.warning(f"Could not read {image_path}, skipping...")
-                    continue
-
-                # Apply GSD degradation if requested (simulates CubeSat resolution)
-                if degrade_gsd:
-                    rgb = degrade_to_cubesat_gsd(rgb)
-
-                # IMPORTANT: Apply mixed resolution operations BEFORE resizing to fixed size
-                if use_mixed_res:
-                    rgb = apply_mixed_resolution_ops([rgb], **mixed_res_config)[0]
-
-                # AFTER augmentation, resize to fixed size for the model
-                rgb = cv2.resize(rgb, (224, 224), interpolation=cv2.INTER_AREA)
-
-                if use_nir:
-                    nir = cv2.cvtColor(rgb, cv2.COLOR_BGR2GRAY)
-                    # Shape (224, 224, 1)
-                    nir = np.expand_dims(nir, axis=-1)
-                    # Shape (224, 224, 4)
-                    rgb_nir = np.concatenate((rgb, nir), axis=-1)
-                    logger.debug(f"NIR processing - RGB shape: {rgb.shape}, NIR shape: {nir.shape}, Combined: {rgb_nir.shape}")
-                    rgb_nir = dyn_zscore_normalize(rgb_nir)
-                    X_array.append(rgb_nir)
-                else:
-                    # RGB NIR fusion algorthm still relevant if we have 4 channels
-                    # the `use_nir` flag is soely for the AI model to take in a 4 channel input tensor
-                    try:
-                        fused_result = rgb_nir_fusion(
-                            rgb,
-                            technique=fusion_technique,
-                            alpha=fusion_alpha
-                        )
-                    except Exception as e:
-                        logger.warning(f"{e}: issue with the rgb nir fusion technique. Skipping for {image_path}")
-                        fused_result = rgb
-                    # Normalization still applied after fallback
-                    rgb = dyn_zscore_normalize(fused_result)
-                    X_array.append(rgb)
-
-                if not end:
-                    y_array.append(image_path[0:1])
-
-        if end:
-            # Ensure y_array has the same length as X_array
-            while len(y_array) < len(X_array):
-                y_array.append("N")
+            X_array.append(prepare_for_model(img, use_nir=use_nir,
+                                             fusion_technique=fusion_technique,
+                                             fusion_alpha=fusion_alpha,
+                                             source=image_path))
+            y_array.append(label)
+            if sources is not None:
+                sources.append(image_path)
+            loaded += 1
     except cv2.error as e:
         logger.error(f"CV2 error in preprocess: {e}")
         raise e
 
-    # Log data loaded
-    logger.info(f"Loaded {len(X_array)} images from {path}")
-    logger.info(f"X_array preprocess {X_array}")
-    logger.info(f"y_array preprocess {y_array}")
+    logger.info(f"Loaded {loaded} '{label}' images from {path}")
+    if skipped:
+        logger.debug(f"Skipped {skipped} non-image files in {path}")
 
     return X_array, y_array
 
@@ -409,7 +428,12 @@ def rgb_nir_fusion(image_data: np.ndarray[Any, np.dtype[np.integer[Any] | np.flo
 
     3. 'none': Return RGB channels only (no fusion)
     """
-    logger.info(f"RGB-NIR fusion called with shape: {image_data.shape}")
+    logger.debug(f"RGB-NIR fusion called with shape: {image_data.shape}")
+
+    # RGB-only images (e.g. the smoke/haze dataset) have no NIR band to fuse
+    if image_data.ndim == 3 and image_data.shape[2] == 3:
+        logger.debug("Image has no NIR channel, skipping fusion")
+        return image_data
 
     # Validate input
     try:

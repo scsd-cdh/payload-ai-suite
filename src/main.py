@@ -17,7 +17,10 @@ from postprocess import (
 )
 
 # Set up logging
-logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
+# force=True: importing mlops can configure the root logger at WARNING level first
+# (it calls logging.warning when no Gemini key is set), which would hide all INFO logs.
+logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+                    force=True)
 logger = logging.getLogger(__name__)
 
 if __name__ == "__main__":
@@ -38,13 +41,14 @@ if __name__ == "__main__":
         --time-range: Time range for the query in the format: FROM TO
                       (e.g., '2023-01-01T00:00:00Z 2023-01-03T23:59:59Z').
         --cloud-mask: Export OmniCloudMask models to ONNX and test on labeled data.
+        --predict: Classify an image or directory as fire/smoke/neither with an exported ONNX model (--onnx-model).
 
     Raises:
         SystemExit: If invalid arguments are provided.
     """
     parser = argparse.ArgumentParser(
         prog='Payload AI Software Suite',
-        description='Remote sensing mission core tools for wildfire image classification and data retrieval'
+        description='Remote sensing mission core tools for wildfire and smoke image classification and data retrieval'
     )
     parser.add_argument('--run-model', required=False, action='store_true', help="Run the model")
     parser.add_argument('--nasa-firms', required=False, action='store_true', help="Fetch data from NASA FIRMS API")
@@ -70,7 +74,12 @@ if __name__ == "__main__":
     parser.add_argument('--fusion-alpha', required=False, type=float, default=0.5, help="Alpha parameter for enhanced_red fusion (0-1)")
     parser.add_argument('--degrade-gsd', required=False, action='store_true', help="Degrade imagery to CubeSat GSD (~85m from 10m Sentinel-2)")
     parser.add_argument('--use-class-weights', required=False, action='store_true', help="Use balanced class weights during training")
+    parser.add_argument('--seed', required=False, type=int, default=42, help="Random seed for training, so runs are repeatable (default: 42)")
+    parser.add_argument('--fine-tune', required=False, action='store_true', help="After training the head, also fine-tune the last ResNet50 block (conv5)")
+    parser.add_argument('--fine-tune-epochs', required=False, type=int, default=10, help="Maximum epochs for the --fine-tune phase (default: 10)")
     parser.add_argument("--compress-image", required=False, type=str, help="Path to the input .NEF image")
+    parser.add_argument('--predict', required=False, type=str, metavar='PATH', help="Classify an image or directory of images as fire/smoke/neither")
+    parser.add_argument('--onnx-model', required=False, type=str, help="Path to the ONNX model used by --predict")
 
     args = parser.parse_args()
     if args.run_model:
@@ -79,8 +88,22 @@ if __name__ == "__main__":
                                     fusion_technique=args.fusion_technique,
                                     fusion_alpha=args.fusion_alpha,
                                     degrade_gsd=args.degrade_gsd,
-                                    use_class_weights=args.use_class_weights)
+                                    use_class_weights=args.use_class_weights,
+                                    seed=args.seed,
+                                    fine_tune=args.fine_tune,
+                                    fine_tune_epochs=args.fine_tune_epochs)
         print(f"\nTraining complete! Experiment ID: {experiment_id}")
+    elif args.predict:
+        if not args.onnx_model:
+            parser.error("--predict requires --onnx-model")
+        results = model.predict(args.predict, args.onnx_model,
+                                fusion_technique=args.fusion_technique,
+                                fusion_alpha=args.fusion_alpha)
+        print()
+        for r in results:
+            print(f"{r['path']}: {r['prediction']} ({r['confidence']:.2f})")
+        counts = {name: sum(r["prediction"] == name for r in results) for name in model.CLASS_NAMES}
+        print(f"\n{len(results)} image(s): " + ", ".join(f"{n} {c}" for n, c in counts.items()))
     elif args.nasa_firms:
         nasa_firms_api()
     elif args.setup_auth:
