@@ -1,0 +1,10 @@
+quantity,datasheet,model,status
+EFL f'eff (mm),29.99,29.9893,fitted (exact)
+S'F' back focal distance (mm),13.96,13.9568,fitted (exact)
+f-number,2.0,2.0,set by EPD
+Sum d lens length (mm),29.17,29.17,set by construction
+SF front focal distance (mm),-4.91,-8.0777,best fit
+SEP entrance pupil (mm),17.05,16.0212,best fit
+S'AP exit pupil (mm),-27.0,-23.3627,best fit
+Pupil magnification,1.37,1.2444,best fit
+HH' principal planes (mm),-11.95,-8.7741,check only

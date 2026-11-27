@@ -1,0 +1,5 @@
+field,image_height_mm,angle_deg,rms_radius_um,geo_radius_um,rms_diameter_px,failed_rays
+On-axis,0.0,0.0,60.28,212.43,21.92,0
+Intermediate,2.816,5.364,65.22,254.45,23.72,0
+Edge,5.632,10.636,103.29,340.66,37.56,0
+Corner,7.965,14.873,166.26,451.33,60.46,0
