@@ -614,6 +614,8 @@ def copernicus_query(use_gcs=False, amount=135):
         for location in locations:
             # Update progress for this specific location
             try:
+                # Bands are stored as NIR, Red, Green, Blue. preprocess.read_image()
+                # depends on this order: change both together.
                 evalscript = """
                 //VERSION=3
                 function setup() {
@@ -791,7 +793,9 @@ def convert_sen2fire_labeled(root_dir=None, output_dir=None, use_nir=False):
                 # B4 - Red (3)
 
                 if use_nir: # NIR Band
-                    channels.append(7) # B8 - NIR (7)
+                    # Store NIR first (NIR, Red, Green, Blue), the same layout as the
+                    # Sentinel-2 download; preprocess.read_image() expects it
+                    channels.insert(0, 7) # B8 - NIR (7)
                     logger.debug(f"Using NIR - channels: {channels}")
 
                 img_crop = img[channels, :, :]  # shape: (3 or 4, 512, 512)

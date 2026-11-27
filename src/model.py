@@ -15,7 +15,6 @@ TODO:
 
 import os
 import json
-import cv2
 import tensorflow as tf
 import keras
 import preprocess as preprocess
@@ -344,6 +343,7 @@ def train(validate=True, epochs=50, use_nir=False, use_gcs=False,
             experiment_id,
             {
                 "class_names": CLASS_NAMES,
+                "band_order": preprocess.BAND_ORDER,
                 "use_nir": use_nir,
                 "dataset": {"total_samples": len(X), "train_samples": len(X_train), "val_samples": len(X_val), "test_samples": len(X_test), "class_counts": class_counts, "source": "gcs" if use_gcs else "local"},
                 "mixed_resolution": {"enabled": use_mixed_res, **(mixed_res_config if use_mixed_res else {})},
@@ -474,6 +474,10 @@ def predict(image_path, onnx_model, fusion_technique='enhanced_red', fusion_alph
     fusion_technique = fusion.get("technique", fusion_technique)
     fusion_alpha = fusion.get("alpha", fusion_alpha)
     class_names = preprocessing_config.get("class_names", CLASS_NAMES)
+    if config and preprocessing_config.get("band_order") != preprocess.BAND_ORDER:
+        logger.warning("This model was trained before the 4-band channel-order fix "
+                       "(no matching band_order in its config.json), so its results on "
+                       "4-band images are unreliable. Retrain it.")
 
     session = rt.InferenceSession(onnx_model, providers=rt.get_available_providers())
     model_input = session.get_inputs()[0]
@@ -481,7 +485,7 @@ def predict(image_path, onnx_model, fusion_technique='enhanced_red', fusion_alph
 
     results = []
     for path in paths:
-        img = cv2.imread(path, cv2.IMREAD_UNCHANGED)
+        img = preprocess.read_image(path)
         if img is None:
             logger.warning(f"Could not read {path}, skipping...")
             continue
