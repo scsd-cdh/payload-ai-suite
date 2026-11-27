@@ -1,7 +1,7 @@
 """All image preprocessing logic and algorithms should go here
 
 Features
-- Handles both 3-channel (RGB) and 4-channel (RGB+NIR from TIFF alpha)
+- Handles both 3-channel (RGB) and 4-channel (RGB+NIR) images; see read_image() for band order
 - Supports streaming images directly from Google Cloud Storage
 - Includes mixed resolution operations for resolution-agnostic training
 """
@@ -179,6 +179,36 @@ class FusionOutput(BaseModel):
 
 IMAGE_EXTENSIONS = ('.tif', '.tiff', '.png', '.jpg', '.jpeg')
 
+# Band order of every image after read_image()/stream_image_from_gcs(): OpenCV's
+# usual BGR, plus NIR last. All preprocessing below relies on this order.
+BAND_ORDER = ["blue", "green", "red", "nir"]
+
+# 4-band files on disk store NIR, Red, Green, Blue (the order the Sentinel-2
+# download in fetch.py asks for; the Sen2Fire converter writes the same).
+# OpenCV decodes a 4-band file as if it were RGBA and returns BGRA, i.e.
+# Green, Red, NIR, Blue. These indices pick Blue, Green, Red, NIR out of that.
+_FOUR_BAND_TO_BAND_ORDER = [3, 0, 1, 2]
+
+
+def to_band_order(img: np.ndarray) -> np.ndarray:
+    """Reorder an image decoded by OpenCV into BAND_ORDER.
+
+    3-band images are already Blue, Green, Red and are returned unchanged.
+    """
+    if img.ndim == 3 and img.shape[2] == 4:
+        return img[:, :, _FOUR_BAND_TO_BAND_ORDER]
+    return img
+
+
+def read_image(path: str) -> Optional[np.ndarray]:
+    """Read an image file with its bands in BAND_ORDER, or None if unreadable.
+
+    Use this instead of cv2.imread for model input, so every image has the
+    same band order in training and in prediction.
+    """
+    img = cv2.imread(path, cv2.IMREAD_UNCHANGED)
+    return None if img is None else to_band_order(img)
+
 
 def is_image_file(filename):
     """True for supported image files. Rejects metadata such as 'x.tif:Zone.Identifier'."""
@@ -238,7 +268,7 @@ def prepare_for_model(img: np.ndarray, use_nir: bool = False,
             nir = np.expand_dims(nir, axis=-1)
             # Shape (224, 224, 4)
             img = np.concatenate((img, nir), axis=-1)
-        # 4-channel images already carry NIR in the alpha channel
+        # 4-channel images from read_image() already have NIR as the last band
     else:
         # RGB NIR fusion algorithm still relevant if we have 4 channels;
         # the `use_nir` flag is solely for the AI model to take in a 4 channel input tensor
@@ -302,7 +332,7 @@ def populate(X_array, y_array, path, label, use_nir=False, gcs_handler=None,
                 image_bytes = gcs_handler.download_as_bytes(image_path)
                 img = stream_image_from_gcs(image_bytes) if image_bytes is not None else None
             else:
-                img = cv2.imread(image_path, cv2.IMREAD_UNCHANGED)
+                img = read_image(image_path)
             if img is None:
                 logger.warning(f"Could not read {image_path}, skipping...")
                 continue
@@ -341,13 +371,13 @@ def stream_image_from_gcs(image_bytes: bytes) -> Optional[np.ndarray]:
         image_bytes: Raw image bytes from GCS
 
     Returns:
-        Image as numpy array, or None if decoding fails
+        Image as numpy array with bands in BAND_ORDER, or None if decoding fails
     """
     try:
         nparr = np.frombuffer(image_bytes, np.uint8)
         # Use IMREAD_UNCHANGED to preserve all channels (including 4-channel TIFFs)
         img = cv2.imdecode(nparr, cv2.IMREAD_UNCHANGED)
-        return img
+        return None if img is None else to_band_order(img)
     except Exception as e:
         logger.error(f"Failed to decode image: {str(e)}")
         return None

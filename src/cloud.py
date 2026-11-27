@@ -16,7 +16,7 @@ import onnx
 import onnxruntime as ort
 import cv2
 import logging
-from preprocess import dyn_zscore_normalize
+from preprocess import dyn_zscore_normalize, read_image
 from paths import resolve_path
 
 # Set up logging
@@ -158,8 +158,8 @@ def test_on_labeled_images(onnx_path, data_dir=None, max_images=5):
             try:
                 logger.debug(f"\n{i+1}. Processing: {img_path.name}")
 
-                # Load image using OpenCV
-                img = cv2.imread(str(img_path), cv2.IMREAD_UNCHANGED)
+                # Bands come back as Blue, Green, Red (+ NIR last for 4-band files)
+                img = read_image(str(img_path))
                 if img is None:
                     logger.error(f"   Error: Could not read {img_path}")
                     continue
