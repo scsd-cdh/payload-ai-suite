@@ -1,0 +1,7 @@
+Stand-in lens (NOT the real TOPAZ prescription)
+Lens 1: N-BK7 R1=20.8885 R2=78.8940 t=3.7213 mm
+Gap lens 1 -> stop: 9.5738 mm
+Gap stop -> lens 2: 12.5191 mm
+Lens 2: N-BK7 R1=31.3598 R2=-40.8221 t=3.3558 mm
+Lens 2 -> sensor (paraxial): 13.9568 mm, best focus shift -720.0 um
+EPD 14.995 mm, f/2.000
